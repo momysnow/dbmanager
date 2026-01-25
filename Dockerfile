@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.10-slim-bullseye
 
 # Install system dependencies
 # postgresql-client: for pg_dump/psql
@@ -14,13 +14,19 @@ RUN apt-get update && apt-get install -y \
     gnupg2 \
     ca-certificates \
     lsb-release \
+    libicu-dev \
+    apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
 
+# Fix for .NET Core (mssql-scripter) globalization issue
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+
+
 # Install Microsoft SQL Server Tools (sqlcmd)
-# Using signed-by approach for Debian 12 (Bookworm) compatibility which is typical for python:3.10-slim-bookworm
-RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
-    && curl https://packages.microsoft.com/config/debian/12/prod.list | tee /etc/apt/sources.list.d/mssql-release.list \
-    && apt-get update \
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/microsoft.gpg \
+    && curl https://packages.microsoft.com/config/debian/11/prod.list | tee /etc/apt/sources.list.d/mssql-release.list
+
+RUN apt-get update \
     && ACCEPT_EULA=Y apt-get install -y msodbcsql18 mssql-tools18 unixodbc-dev \
     && echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bashrc \
     && rm -rf /var/lib/apt/lists/*
