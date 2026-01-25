@@ -1,0 +1,9 @@
+typer
+rich
+python-crontab
+psycopg2-binary
+mysql-connector-python
+python-dotenv
+pymssql
+mssql-scripter
+InquirerPy
