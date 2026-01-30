@@ -7,5 +7,3 @@ services:
     environment:
       - DBMANAGER_DATA_DIR=/app/data
     restart: unless-stopped
-    # By default, it runs the entrypoint which starts cron and idles.
-    # To use interactive shell: docker-compose exec -it app python main.py interactive

@@ -54,7 +54,7 @@ RUN echo '#!/bin/bash\n\
     cron\n\
     # Keep container running or execute command\n\
     if [ "$#" -eq 0 ]; then\n\
-    tail -f /dev/null\n\
+    exec python main.py interactive\n\
     else\n\
     exec "$@"\n\
     fi' > /entrypoint.sh && chmod +x /entrypoint.sh
