@@ -1,11 +1,13 @@
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Type
+import os
 from config import ConfigManager, CONFIG_DIR
 from .providers.base import BaseProvider
 from .providers.postgres import PostgresProvider
 from .providers.mysql import MySQLProvider
 from .providers.sqlserver import SQLServerProvider
+from .bucket_manager import BucketManager
 # from .providers.sqlite import SQLiteProvider # To be implemented
 
 BACKUP_ROOT = CONFIG_DIR / "backups"
@@ -13,6 +15,7 @@ BACKUP_ROOT = CONFIG_DIR / "backups"
 class DBManager:
     def __init__(self):
         self.config_manager = ConfigManager()
+        self.bucket_manager = BucketManager(self.config_manager)
         self.providers: Dict[str, Type[BaseProvider]] = {
             "postgres": PostgresProvider,
             "mysql": MySQLProvider,
@@ -81,15 +84,44 @@ class DBManager:
         backup_dir = self._get_backup_dir(db_id)
         
         # Get options
-        # backup_type = db_config.get("backup_type", "full") # Deprecated, assuming full
-        retention = int(db_config.get("retention", 0)) # 0 = infinite
+        retention = int(db_config.get("retention", 0)) # 0 = infinite (local)
+        s3_enabled = db_config.get("s3_enabled", False)
+        s3_bucket_id = db_config.get("s3_bucket_id")
+        s3_retention = int(db_config.get("s3_retention", 0))  # 0 = infinite (S3)
 
-        # Run backup
+        # Run local backup
         path = provider.backup(str(backup_dir))
+        
+        # Upload to S3 if configured
+        if s3_enabled and s3_bucket_id:
+            try:
+                storage = self.bucket_manager.get_storage(s3_bucket_id)
+                if storage:
+                    filename = os.path.basename(path)
+                    s3_key = f"backups/{db_id}/{filename}"
+                    
+                    # Add metadata
+                    metadata = {
+                        'database_id': str(db_id),
+                        'database_name': db_config.get('name', ''),
+                        'provider': db_config.get('provider', ''),
+                        'backup_date': datetime.now().isoformat()
+                    }
+                    
+                    if storage.upload_file(path, s3_key, metadata):
+                        print(f"✅ Backup uploaded to S3: {s3_key}")
+                    else:
+                        print(f"⚠️ S3 upload failed, local backup retained")
+            except Exception as e:
+                print(f"⚠️ S3 upload error: {e}, local backup retained")
 
-        # Handle retention
+        # Handle local retention
         if retention > 0:
             self._enforce_retention(db_id, retention)
+        
+        # Handle S3 retention
+        if s3_enabled and s3_bucket_id and s3_retention > 0:
+            self._enforce_s3_retention(db_id, s3_bucket_id, s3_retention)
             
         return path
 
@@ -102,6 +134,39 @@ class DBManager:
                     Path(b["path"]).unlink()
                 except Exception:
                     pass
+    
+    def _enforce_s3_retention(self, db_id: int, bucket_id: int, keep_last: int):
+        """
+        Enforce retention policy on S3 backups
+        
+        Args:
+            db_id: Database ID
+            bucket_id: S3 bucket ID
+            keep_last: Number of backups to keep
+        """
+        try:
+            storage = self.bucket_manager.get_storage(bucket_id)
+            if not storage:
+                return
+            
+            # List all backups for this database in S3
+            prefix = f"backups/{db_id}/"
+            s3_backups = storage.list_files(prefix)
+            
+            # Sort by last_modified descending
+            s3_backups = sorted(s3_backups, key=lambda x: x['last_modified'], reverse=True)
+            
+            # Delete old backups
+            if len(s3_backups) > keep_last:
+                to_delete = s3_backups[keep_last:]
+                for backup in to_delete:
+                    try:
+                        storage.delete_file(backup['key'])
+                        print(f"🗑️ Deleted old S3 backup: {backup['key']}")
+                    except Exception as e:
+                        print(f"⚠️ Failed to delete S3 backup {backup['key']}: {e}")
+        except Exception as e:
+            print(f"⚠️ S3 retention cleanup failed: {e}")
 
     def list_backups(self, db_id: int) -> List[Dict[str, Any]]:
         backup_dir = self._get_backup_dir(db_id)
@@ -130,4 +195,3 @@ class DBManager:
             raise FileNotFoundError(f"Backup file {backup_file} not found")
         
         return provider.restore(backup_file)
-
