@@ -1,12 +1,16 @@
-typer>=0.9.0
-rich>=13.0.0
-python-crontab
-psycopg2-binary>=2.9.9
-mysql-connector-python
-python-dotenv
+```
+# Core dependencies
+typer
+InquirerPy
+rich
+pydantic
+
+# Database drivers
+psycopg2-binary
 pymysql>=1.1.0
 pymssql>=2.2.11
+pymongo>=4.0.0
+
+# Cloud storage
 boto3>=1.34.0
-mssql-scripter
-InquirerPy>=0.3.4
 docker

@@ -37,6 +37,14 @@ RUN apt-get update \
     && echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bashrc \
     && rm -rf /var/lib/apt/lists/*
 
+# Install MongoDB Database Tools
+# Note: MongoDB provides packages for Debian 11 (Bullseye)
+RUN wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/mongodb-org-7.0.gpg \
+    && echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/debian bullseye/mongodb-org/7.0 main" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
+    && apt-get update \
+    && apt-get install -y mongodb-database-tools \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PATH="$PATH:/opt/mssql-tools18/bin"
 
 WORKDIR /app

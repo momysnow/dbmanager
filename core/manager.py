@@ -7,13 +7,14 @@ from .providers.base import BaseProvider
 from .providers.postgres import PostgresProvider
 from .providers.mysql import MySQLProvider
 from .providers.sqlserver import SQLServerProvider
-from .providers.sqlite import SQLiteProvider
+from .providers.mongodb import MongoDBProvider
+from .providers.mariadb import MariaDBProvider
 from .bucket_manager import BucketManager
 from .backup_utils import save_checksum, verify_backup, verify_checksum
 from .compression import compress_file, get_compression_ratio
 from .encryption import encrypt_file, decrypt_file
 from .notifications import NotificationManager
-# from .providers.mongodb import MongoDBProvider # To be implemented
+
 
 BACKUP_ROOT = CONFIG_DIR / "backups"
 
@@ -33,9 +34,9 @@ class DBManager:
         self.provider_map: Dict[str, Type[BaseProvider]] = {
             "postgres": PostgresProvider,
             "mysql": MySQLProvider,
+            "mariadb": MariaDBProvider,
             "sqlserver": SQLServerProvider,
-            "sqlite": SQLiteProvider,
-            # "mongodb": MongoDBProvider,  # To be implemented
+            "mongodb": MongoDBProvider,
         }
 
     def get_supported_providers(self) -> List[str]:
