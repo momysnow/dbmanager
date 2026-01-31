@@ -128,12 +128,21 @@ class DBManager:
             
             response = input("\n   Migrate backups now? (y/n): ").lower().strip()
             if response == 'y':
+                # Ask about cleanup
+                delete_response = input("   Delete backups from old bucket after migration? (y/n): ").lower().strip()
+                delete_old = delete_response == 'y'
+                
                 migrator.migrate_database_backups(
                     db_id, 
                     old_bucket_id, 
                     s3_bucket_id,
-                    delete_old=False  # Keep old backups by default for safety
+                    delete_old=delete_old
                 )
+                
+                if delete_old:
+                    print("   ✅ Migration complete - old backups deleted")
+                else:
+                    print("   ✅ Migration complete - old backups preserved")
             else:
                 print("   ⚠️  Migration skipped - backups remain in old bucket")
         
