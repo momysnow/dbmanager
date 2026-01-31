@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  garage:
+    image: dxflrs/garage:v0.9.0
+    container_name: dbmanager-garage-test
+    ports:
+      - "3900:3900" # S3 API
+      - "3902:3902" # Admin API
+    environment:
+      GARAGE_RPC_SECRET: "replace_with_your_secret_key_do_not_use_in_prod"
+    volumes:
+      - garage_data:/data
+      - ./garage.toml:/etc/garage.toml:ro
+    command: -c /etc/garage.toml server
+
+volumes:
+  garage_data:
+    driver: local
