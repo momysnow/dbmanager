@@ -56,18 +56,80 @@ class DBManager:
         self.config_manager.remove_database(db_id)
 
     def update_database(self, db_id: int, name: str, provider_type: str, 
-                       connection_params: Dict[str, Any], retention: int = 0):
+                       connection_params: Dict[str, Any], retention: int = 0,
+                       s3_enabled: bool = False, s3_bucket_id: int = None, 
+                       s3_retention: int = 0):
+        """
+        Update database configuration
+        
+        Args:
+            db_id: Database ID
+            name: Database name
+            provider_type: Provider type ('postgres', 'mysql', 'sqlserver')
+            connection_params: Connection parameters dict
+            retention: Local retention policy (number of backups to keep)
+            s3_enabled: Enable S3 backups
+            s3_bucket_id: S3 bucket ID to use
+            s3_retention: S3 retention policy (number of backups to keep on S3)
+        
+        Returns:
+            True if successful
+        """
         if provider_type not in self.providers:
             raise ValueError(f"Provider {provider_type} not supported.")
         
+        # Get current config to check for bucket change
+        current_config = self.config_manager.get_database(db_id)
+        old_bucket_id = current_config.get('s3_bucket_id') if current_config else None
+        
+        # Prepare new config
         db_config = {
             "name": name,
             "provider": provider_type,
             "params": connection_params,
-            # "backup_type": "full", # Implicit default
-            "retention": retention
+            "retention": retention,
+            "s3_enabled": s3_enabled,
+            "s3_bucket_id": s3_bucket_id,
+            "s3_retention": s3_retention
         }
-        return self.config_manager.update_database(db_id, db_config)
+        
+        # Check if S3 bucket changed
+        bucket_changed = (
+            old_bucket_id != s3_bucket_id and 
+            old_bucket_id is not None and 
+            s3_bucket_id is not None and
+            s3_enabled
+        )
+        
+        # Update config
+        result = self.config_manager.update_database(db_id, db_config)
+        
+        # Trigger bucket migration if needed
+        if bucket_changed and result:
+            print(f"\n⚠️  S3 bucket changed - migration required")
+            from .bucket_migrator import BucketMigrator
+            migrator = BucketMigrator(self.bucket_manager)
+            
+            # Ask user for confirmation
+            print(f"   Old bucket: {self.bucket_manager.get_bucket_name(old_bucket_id)}")
+            print(f"   New bucket: {self.bucket_manager.get_bucket_name(s3_bucket_id)}")
+            
+            # Estimate migration size
+            estimate = migrator.estimate_migration_size(db_id, old_bucket_id)
+            print(f"   Backups to migrate: {estimate['count']} ({estimate['size_mb']} MB)")
+            
+            response = input("\n   Migrate backups now? (y/n): ").lower().strip()
+            if response == 'y':
+                migrator.migrate_database_backups(
+                    db_id, 
+                    old_bucket_id, 
+                    s3_bucket_id,
+                    delete_old=False  # Keep old backups by default for safety
+                )
+            else:
+                print("   ⚠️  Migration skipped - backups remain in old bucket")
+        
+        return result
 
     def _get_backup_dir(self, db_id: int) -> Path:
         db_config = self.config_manager.get_database(db_id)
