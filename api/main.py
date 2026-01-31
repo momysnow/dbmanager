@@ -1,6 +1,6 @@
 """FastAPI application for DBManager REST API"""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -9,6 +9,9 @@ from api.routers import databases, backups, s3_buckets, schedules, settings
 
 # Task manager for background operations
 from api.task_manager import task_manager
+
+# WebSocket handler
+from api.websockets import progress_websocket_endpoint
 
 
 @asynccontextmanager
@@ -44,6 +47,13 @@ app.include_router(backups.router, prefix="/api/v1", tags=["Backups"])
 app.include_router(s3_buckets.router, prefix="/api/v1", tags=["S3 Buckets"])
 app.include_router(schedules.router, prefix="/api/v1", tags=["Schedules"])
 app.include_router(settings.router, prefix="/api/v1", tags=["Settings"])
+
+
+# WebSocket endpoint for progress updates
+@app.websocket("/api/v1/ws/tasks/{task_id}")
+async def websocket_progress(websocket: WebSocket, task_id: str):
+    """WebSocket endpoint for real-time task progress updates"""
+    await progress_websocket_endpoint(websocket, task_id)
 
 
 @app.get("/")
