@@ -1,63 +1,155 @@
-# DB Manager CLI
+# DBManager - Database Backup & Restore Tool
 
-A simple, guided command-line tool for managing database connections, checking status, and performing backups/restores for PostgreSQL, MySQL and Microsoft SQL Server.
+Enterprise-grade backup and restore tool for multiple database providers with S3 support, encryption, compression, scheduling, and REST API.
 
-## Features
+## 🚀 Quick Start (Docker)
 
-- **Guided Interface**: Interactive shell to manage databases effortlessly.
-- **Multiple Providers**: Supports PostgreSQL, MySQL and Microsoft SQL Server.
-- **Backups**: Create manual backups or schedule them via Cron.
-- **Restores**: Easy restoration from existing backup files.
-- **Docker Support**: Fully containerized with persistent storage.
+```bash
+docker compose up -d --build
+docker exec -it dbmanager bash
+python main.py interactive
+```
 
-## Quick Start (Docker)
+## 📦 Supported Databases
 
-0. **Prerequisites**: Docker & Docker Compose.
-1. **Navigate to Directory**:
-   Ensure you are in the project folder where `docker-compose.yml` is located:
-   ```bash
-   cd dbmanager
-   ```
-2. **Start the Service**:
-   ```bash
-   docker-compose up -d
-   ```
-2. **Open the CLI**:
-   ```bash
-   docker-compose exec -it app python main.py interactive
-   ```
+- ✅ **PostgreSQL** (pg_dump/pg_restore)
+- ✅ **MySQL** (mysqldump/mysql)
+- ✅ **MariaDB** (MySQL protocol)
+- ✅ **SQL Server** (sqlcmd/bcp)
+- ✅ **MongoDB** (mongodump/mongorestore)
 
-## Quick Start (Local)
+## ✨ Features
 
-0. **Prerequisites**: Python 3.10+, `pg_dump`/`psql` (for Postgres), `mysqldump`/`mysql` (for MySQL) installed.
-1. **Install Dependencies**:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-2. **Run the CLI**:
-   ```bash
-   python main.py interactive
-   ```
+### Core
+- 🔄 **Backup & Restore** - All major databases
+- ☁️ **S3 Storage** - AWS, Cloudflare R2, MinIO
+- 🗜️ **Compression** - gzip, zstandard (configurable levels)
+- 🔐 **Encryption** - AES-256 or ChaCha20
+- ✅ **Checksum** - SHA-256 verification
+- 🔁 **Config Sync** - S3-based configuration backup
 
-## Commands
+### Automation
+- ⏰ **Scheduling** - Cron-based automatic backups
+- 🔔 **Notifications** - Email, Slack, Teams, Discord
+- 📊 **Dashboard** - CLI statistics and health monitoring
+- 📝 **Structured Logging** - Rotating logs with JSON support
 
-Once in the interactive shell (`interactive` command), you can:
+### API
+- 🌐 **REST API** - FastAPI with OpenAPI docs
+- 🔌 **WebSockets** - Real-time progress tracking
+- 🎯 **Background Tasks** - Async backup/restore
+- 📡 **Service Mode** - Daemon API server
 
-- **List Databases**: See all configured connections.
-- **Add Database**: distinct alias, host, user, password, etc.
-- **Check Status**: Verify connectivity.
-- **Backup**: Run an immediate backup.
-- **Restore**: Overwrite a database with a previous backup.
-- **Schedule**: Set a cron schedule (e.g., `0 0 * * *` for daily midnight backups).
+### Management
+- 📤 **Export/Import** - Configuration backup/restore
+- 💾 **Retention** - Local and S3 cleanup policies
+- 🏥 **Health Checks** - System status monitoring
 
-## Configuration
+## 🏗️ Architecture
 
-- **Docker**: Data is stored in the `./data` folder in your project root.
-- **Local**: Data is stored in `~/.dbmanager/` by default, or defined by `DBMANAGER_DATA_DIR` env var.
+```
+┌─────────────────────────────────────────┐
+│         CLI (Interactive Menu)          │
+│  - Dashboard                            │
+│  - Manage Databases                     │
+│  - Schedules, Settings, S3              │
+└─────────────┬───────────────────────────┘
+              │
+              ↓
+┌─────────────────────────────────────────┐
+│         Core Business Logic             │
+│  - DBManager                            │
+│  - Providers (5 database types)         │
+│  - BucketManager (S3)                   │
+│  - NotificationManager                  │
+│  - Encryption, Compression, Checksums   │
+└─────────────┬───────────────────────────┘
+              │
+              ↓
+┌─────────────────────────────────────────┐
+│      REST API (FastAPI, optional)       │
+│  - Endpoints for all operations         │
+│  - WebSocket progress tracking          │
+│  - Background task manager              │
+└─────────────────────────────────────────┘
+```
 
-## Troubleshooting
+## 📖 Documentation
 
-- **Connection Failed**: Ensure you are using the correct host. Inside Docker, use `host.docker.internal` to connect to a DB running on your host machine.
-- **Cron Not Running**: Ensure the container is running (`docker-compose ps`).
+- [Installation Guide](INSTALLATION.md) - Docker & local setup
+- [API Documentation](http://localhost:8000/docs) - Swagger UI (when API running)
+
+## 🛠️ Tech Stack
+
+- **Python 3.10+**
+- **CLI**: Typer, InquirerPy, Rich
+- **API**: FastAPI, Uvicorn, WebSockets
+- **Database Drivers**: psycopg2, pymysql, pymssql, pymongo
+- **Cloud**: boto3 (S3)
+- **Compression**: zstandard
+- **Encryption**: cryptography
+
+## 🐳 Docker
+
+All database tools pre-installed:
+- PostgreSQL 18 client
+- MySQL/MariaDB client
+- SQL Server tools (mssql-tools18)
+- MongoDB Database Tools
+
+## 📝 Configuration
+
+Config stored in: `~/.dbmanager/config.json`
+
+```json
+{
+  "databases": [...],
+  "s3_buckets": [...],
+  "schedules": [...],
+  "global_settings": {
+    "compression": {...},
+    "encryption": {...}
+  },
+  "notifications": {...}
+}
+```
+
+## 🎯 Usage Examples
+
+### CLI
+```bash
+# Interactive menu
+python main.py interactive
+
+# Start API server
+python main.py start-api
+
+# Check API status
+python main.py status-api
+```
+
+### API
+```bash
+# Start API
+docker compose up -d
+
+# Access Swagger docs
+open http://localhost:8000/docs
+
+# Backup via API
+curl -X POST http://localhost:8000/api/v1/backups/1
+```
+
+## 🧪 Testing
+
+```bash
+python -m pytest tests/
+```
+
+## 📄 License
+
+[Your License]
+
+## 🤝 Contributing
+
+[Contributing guidelines]
