@@ -17,7 +17,9 @@ class ConfigManager:
             CONFIG_DIR.mkdir()
         if not CONFIG_FILE.exists():
             default_config = {
-                "databases": []
+                "databases": [],
+                "s3_buckets": [],
+                "config_sync_bucket_id": None
             }
             with open(CONFIG_FILE, "w") as f:
                 json.dump(default_config, f, indent=4)
