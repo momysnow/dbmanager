@@ -59,16 +59,21 @@ def schedule_wizard():
     if db_id == "back": return
 
     presets = [
+        Choice("back", "← Back"),
+        Separator(),
         Choice("0 0 * * *", "Daily @ Midnight"),
         Choice("0 0 * * 0", "Weekly (Sunday)"),
         Choice("0 * * * *", "Hourly"),
         Choice("0 */6 * * *", "Every 6 Hours"),
+        Separator(),
         Choice("custom", "Custom Schedule")
     ]
     
     selected_schedule = get_selection("Select Schedule Preset", presets)
     
-    if selected_schedule == "custom":
+    if selected_schedule == "back":
+        return
+    elif selected_schedule == "custom":
         print_info("Cron Format: * * * * * (min hour day month day_of_week)")
         schedule = get_input("Enter Cron Schedule:", "0 0 * * *")
     else:

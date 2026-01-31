@@ -386,10 +386,16 @@ def add_database_wizard():
     if s3_enabled:
         buckets = manager.bucket_manager.list_buckets()
         if buckets:
-            bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
+            bucket_choices = [
+                Choice(value="skip", name="← Skip S3 config"),
+                Separator(),
+            ] + [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
             s3_bucket_id = get_selection("Select S3 bucket", bucket_choices)
-            s3_retention_str = get_input("S3 Retention (keep last N backups on S3, 0=infinite):", default="0")
-            s3_retention = int(s3_retention_str) if s3_retention_str else 0
+            if s3_bucket_id == "skip":
+                s3_enabled = False
+            else:
+                s3_retention_str = get_input("S3 Retention (keep last N backups on S3, 0=infinite):", default="0")
+                s3_retention = int(s3_retention_str) if s3_retention_str else 0
         else:
             print_info("No S3 buckets configured. Add one in 'Manage S3 Buckets'.")
             s3_enabled = False
@@ -460,15 +466,21 @@ def edit_database_wizard(db_id: int):
     if s3_enabled:
         buckets = manager.bucket_manager.list_buckets()
         if buckets:
-            bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
             current_bucket_id = db.get('s3_bucket_id')
+            bucket_choices = [
+                Choice(value="keep", name="← Keep current / Skip"),
+                Separator(),
+            ] + [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
             
-            default_bucket = current_bucket_id if current_bucket_id in [b['id'] for b in buckets] else None
-            s3_bucket_id = get_selection("Select S3 bucket", bucket_choices, default=default_bucket)
-            
-            current_s3_retention = db.get('s3_retention', 0)
-            s3_retention_str = get_input("S3 Retention (keep last N backups on S3, 0=infinite):", default=str(current_s3_retention))
-            s3_retention = int(s3_retention_str) if s3_retention_str else 0
+            selected = get_selection("Select S3 bucket", bucket_choices)
+            if selected == "keep":
+                s3_bucket_id = current_bucket_id
+                s3_retention = db.get('s3_retention', 0)
+            else:
+                s3_bucket_id = selected
+                current_s3_retention = db.get('s3_retention', 0)
+                s3_retention_str = get_input("S3 Retention (keep last N backups on S3, 0=infinite):", default=str(current_s3_retention))
+                s3_retention = int(s3_retention_str) if s3_retention_str else 0
         else:
             print_info("No S3 buckets configured. Add one in 'Manage S3 Buckets'.")
             s3_enabled = False

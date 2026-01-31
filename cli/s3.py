@@ -61,9 +61,13 @@ def manage_s3_buckets_menu():
             add_s3_bucket_wizard()
         elif action == "manage":
             if buckets:
-                bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
+                bucket_choices = [
+                    Choice(value="back", name="← Back"),
+                    Separator(),
+                ] + [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
                 bucket_id = get_selection("Select bucket to manage", bucket_choices)
-                manage_single_bucket(bucket_id)
+                if bucket_id != "back":
+                    manage_single_bucket(bucket_id)
         elif action == "back":
             break
 
