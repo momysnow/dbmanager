@@ -1,9 +1,19 @@
-```
 # Core dependencies
 typer
 InquirerPy
 rich
 pydantic
+python-crontab
+structlog
+
+# API
+fastapi
+uvicorn[standard]
+python-multipart
+websockets
+jinja2
+# requests is often needed for client calls/notifications
+requests
 
 # Database drivers
 psycopg2-binary
@@ -14,3 +24,9 @@ pymongo>=4.0.0
 # Cloud storage
 boto3>=1.34.0
 docker
+
+# Utilities
+cryptography
+zstandard
+python-jose[cryptography]
+passlib[bcrypt]

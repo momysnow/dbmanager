@@ -1,4 +1,4 @@
-import mysql.connector
+import pymysql
 import subprocess
 import os
 from datetime import datetime
@@ -10,13 +10,13 @@ class MySQLProvider(BaseProvider):
     def check_connection(self) -> bool:
         params = self.config["params"]
         try:
-            conn = mysql.connector.connect(
+            conn = pymysql.connect(
                 host=params["host"],
                 port=int(params["port"]),
                 user=params["user"],
                 password=params["password"],
                 database=params["database"],
-                connection_timeout=3
+                connect_timeout=3
             )
             conn.close()
             return True
