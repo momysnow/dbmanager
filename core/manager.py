@@ -11,6 +11,7 @@ from .bucket_manager import BucketManager
 from .backup_utils import save_checksum, verify_backup, verify_checksum
 from .compression import compress_file, get_compression_ratio
 from .encryption import encrypt_file, decrypt_file
+from .notifications import NotificationManager
 # from .providers.sqlite import SQLiteProvider # To be implemented
 
 BACKUP_ROOT = CONFIG_DIR / "backups"

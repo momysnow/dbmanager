@@ -1,7 +1,5 @@
 """DBManager CLI - Entry Point"""
 import typer
-import subprocess
-import sys
 from InquirerPy.base.control import Choice
 from InquirerPy.separator import Separator
 
@@ -10,7 +8,7 @@ from cli.database import manage_databases_menu, add_database_wizard
 from cli.s3 import manage_s3_buckets_menu
 from cli.schedule import schedule_menu
 from cli.settings import settings_menu
-from utils.ui import print_header, get_selection, get_confirm
+from utils.ui import print_header, get_selection
 
 app = typer.Typer()
 
@@ -82,19 +80,8 @@ def interactive():
         elif action == "settings":
             settings_menu()
         elif action == "api":
-            # Start API in subprocess to not block CLI
-            console.print("\n[bold cyan]Starting REST API server...[/bold cyan]")
-            console.print("Server: [bold]http://localhost:8000[/bold]")
-            console.print("Docs: [bold]http://localhost:8000/docs[/bold]\n")
-            console.print("[yellow]Press Ctrl+C to stop the server and return to menu[/yellow]\n")
-            
-            try:
-                subprocess.run([sys.executable, "run_api.py"])
-            except KeyboardInterrupt:
-                console.print("\n[yellow]API server stopped[/yellow]")
-            
-            from utils.ui import get_input
-            get_input("\nPress Enter to continue...")
+            # Call the api() command directly
+            api()
         elif action == "exit":
             console.print("Goodbye!")
             break

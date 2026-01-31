@@ -30,6 +30,29 @@ class ConfigManager:
                         "enabled": False,
                         "password": None
                     }
+                },
+                "notifications": {
+                    "email": {
+                        "enabled": False,
+                        "smtp_host": "smtp.gmail.com",
+                        "smtp_port": 587,
+                        "smtp_username": "",
+                        "smtp_password": "",
+                        "from_email": "",
+                        "to_emails": []
+                    },
+                    "slack": {
+                        "enabled": False,
+                        "webhook_url": ""
+                    },
+                    "teams": {
+                        "enabled": False,
+                        "webhook_url": ""
+                    },
+                    "discord": {
+                        "enabled": False,
+                        "webhook_url": ""
+                    }
                 }
             }
             with open(CONFIG_FILE, "w") as f:
@@ -159,3 +182,23 @@ class ConfigManager:
         global_settings = self.get_global_settings()
         global_settings["encryption"] = settings
         self.update_global_settings(global_settings)
+
+    def get_notification_settings(self, provider: str = None) -> Dict[str, Any]:
+        """Get notification settings for a specific provider or all"""
+        notifications = self.config.get("notifications", {})
+        
+        if provider:
+            return notifications.get(provider, {})
+        
+        return notifications
+    
+    def update_notification_settings(self, provider: str, **settings):
+        """Update notification settings for a provider"""
+        if "notifications" not in self.config:
+            self.config["notifications"] = {}
+        
+        if provider not in self.config["notifications"]:
+            self.config["notifications"][provider] = {}
+        
+        self.config["notifications"][provider].update(settings)
+        self.save_config()
