@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DBManager Enterprise</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="brand">
+                <i class="fa-solid fa-server"></i> DBManager
+            </div>
+
+            <a href="#" class="nav-link active" data-page="dashboard" onclick="router.navigate('dashboard')">
+                <i class="fa-solid fa-chart-pie"></i> Dashboard
+            </a>
+            <a href="#" class="nav-link" data-page="databases" onclick="router.navigate('databases')">
+                <i class="fa-solid fa-database"></i> Databases
+            </a>
+            <a href="#" class="nav-link" data-page="backups" onclick="router.navigate('backups')">
+                <i class="fa-solid fa-clock-rotate-left"></i> Backups
+            </a>
+            <a href="#" class="nav-link" data-page="s3" onclick="router.navigate('s3')">
+                <i class="fa-brands fa-aws"></i> S3 Storage
+            </a>
+            <a href="#" class="nav-link" data-page="schedules" onclick="router.navigate('schedules')">
+                <i class="fa-regular fa-calendar"></i> Schedules
+            </a>
+            <a href="#" class="nav-link" data-page="settings" onclick="router.navigate('settings')">
+                <i class="fa-solid fa-gear"></i> Settings
+            </a>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="app">
+            <!-- Dynamic Content Injected Here -->
+            <div class="header">
+                <h1 class="page-title">Dashboard</h1>
+                <div class="actions">
+                    <button class="btn btn-primary" onclick="ui.modals.addDb.open()">
+                        <i class="fa-solid fa-plus"></i> Add Database
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dashboard Stats -->
+            <div class="card-grid">
+                <div class="glass-card">
+                    <div class="stat-label">Total Databases</div>
+                    <div class="stat-value" id="stats-total-db">-</div>
+                    <div class="text-success"><i class="fa-solid fa-check"></i> <span id="stats-active-db">-</span>
+                        Active</div>
+                </div>
+                <div class="glass-card">
+                    <div class="stat-label">Total Backups</div>
+                    <div class="stat-value" id="stats-total-backups">-</div>
+                    <div class="text-muted">Last 24h</div>
+                </div>
+                <div class="glass-card">
+                    <div class="stat-label">Storage Used</div>
+                    <div class="stat-value" id="stats-storage">0 GB</div>
+                    <div class="text-secondary">Local + S3</div>
+                </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <h3 style="margin-top: 40px; margin-bottom: 20px;">Recent Activity</h3>
+            <div class="glass-card" style="padding: 0; overflow: hidden;">
+                <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                    <thead style="background: rgba(255,255,255,0.05); color: var(--text-secondary);">
+                        <tr>
+                            <th style="padding: 16px;">Time</th>
+                            <th style="padding: 16px;">Database</th>
+                            <th style="padding: 16px;">Action</th>
+                            <th style="padding: 16px;">Status</th>
+                            <th style="padding: 16px;">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activity-list">
+                        <tr>
+                            <td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                                Loading activity...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" id="add-db-modal">
+        <div class="modal">
+            <h2 style="margin-top: 0;">Add Database</h2>
+            <form id="add-db-form" onsubmit="api.addDatabase(event)">
+                <label>Name</label>
+                <input type="text" name="name" required placeholder="My Production DB">
+
+                <label>Provider</label>
+                <select name="provider">
+                    <option value="postgres">PostgreSQL</option>
+                    <option value="mysql">MySQL</option>
+                    <option value="mariadb">MariaDB</option>
+                    <option value="sqlserver">SQL Server</option>
+                    <option value="mongodb">MongoDB</option>
+                </select>
+
+                <label>Host</label>
+                <input type="text" name="host" required placeholder="localhost">
+
+                <label>Port</label>
+                <input type="number" name="port" required value="5432">
+
+                <label>Database Name</label>
+                <input type="text" name="database" required>
+
+                <label>User</label>
+                <input type="text" name="user" required>
+
+                <label>Password</label>
+                <input type="password" name="password" required>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="button" class="btn" style="background: rgba(255,255,255,0.1);"
+                        onclick="ui.modals.addDb.close()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Database</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Task Progress Modal -->
+    <div class="modal-overlay" id="task-modal">
+        <div class="modal" style="width: 600px;">
+            <h2 id="task-title" style="margin-top: 0;">Task in Progress</h2>
+            <div style="margin: 30px 0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                    <span id="task-step">Initializing...</span>
+                    <span id="task-percent">0%</span>
+                </div>
+                <div style="background: rgba(255,255,255,0.1); height: 8px; border-radius: 4px; overflow: hidden;">
+                    <div id="task-bar"
+                        style="background: var(--primary); width: 0%; height: 100%; transition: width 0.3s;"></div>
+                </div>
+                <div id="task-message" style="margin-top: 10px; color: var(--text-secondary); font-size: 14px;">
+                    Waiting for server...
+                </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end;">
+                <button class="btn" id="task-close-btn" onclick="ui.modals.task.close()"
+                    style="display: none;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>
