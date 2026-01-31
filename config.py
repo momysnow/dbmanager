@@ -25,6 +25,10 @@ class ConfigManager:
                         "enabled": False,
                         "algorithm": "gzip",
                         "level": 6
+                    },
+                    "encryption": {
+                        "enabled": False,
+                        "password": None
                     }
                 }
             }
@@ -133,4 +137,25 @@ class ConfigManager:
         
         global_settings = self.get_global_settings()
         global_settings["compression"] = settings
+        self.update_global_settings(global_settings)
+    
+    def get_encryption_settings(self) -> Dict[str, Any]:
+        """Get encryption settings"""
+        global_settings = self.get_global_settings()
+        return global_settings.get("encryption", {
+            "enabled": False,
+            "password": None
+        })
+    
+    def update_encryption_settings(self, enabled: bool = None, password: str = None):
+        """Update encryption settings"""
+        settings = self.get_encryption_settings()
+        
+        if enabled is not None:
+            settings["enabled"] = enabled
+        if password is not None:
+            settings["password"] = password
+        
+        global_settings = self.get_global_settings()
+        global_settings["encryption"] = settings
         self.update_global_settings(global_settings)

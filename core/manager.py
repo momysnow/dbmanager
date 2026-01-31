@@ -10,6 +10,7 @@ from .providers.sqlserver import SQLServerProvider
 from .bucket_manager import BucketManager
 from .backup_utils import save_checksum, verify_backup, verify_checksum
 from .compression import compress_file, get_compression_ratio
+from .encryption import encrypt_file, decrypt_file
 # from .providers.sqlite import SQLiteProvider # To be implemented
 
 BACKUP_ROOT = CONFIG_DIR / "backups"
@@ -213,6 +214,36 @@ class DBManager:
                 print(f"✅ Compressed: {os.path.basename(compressed_path)}")
             except Exception as e:
                 print(f"⚠️  Compression failed: {e}, using uncompressed backup")
+        
+        # Encrypt backup if enabled
+        encryption_settings = self.config_manager.get_encryption_settings()
+        if encryption_settings.get("enabled", False):
+            password = encryption_settings.get("password")
+            if not password:
+                print(f"⚠️  Encryption enabled but no password set, skipping encryption")
+            else:
+                try:
+                    print(f"🔐 Encrypting backup...")
+                    encrypted_path = encrypt_file(path, password, remove_original=True)
+                    
+                    # Update path to encrypted file
+                    old_path = path
+                    path = encrypted_path
+                    
+                    # Update checksum file reference
+                    if checksum_file:
+                        # Rename checksum file to match encrypted file
+                        old_checksum = checksum_file
+                        checksum_file = f"{encrypted_path}.sha256"
+                        try:
+                            os.rename(old_checksum, checksum_file)
+                        except:
+                            # If rename fails, regenerate checksum for encrypted file
+                            checksum_file = save_checksum(encrypted_path)
+                    
+                    print(f"✅ Encrypted: {os.path.basename(encrypted_path)}")
+                except Exception as e:
+                    print(f"⚠️  Encryption failed: {e}, using unencrypted backup")
         
         # Upload to S3 if configured
         if s3_enabled and s3_bucket_id:
