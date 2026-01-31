@@ -27,28 +27,80 @@ def perform_backup(db_id: int = typer.Option(..., help="ID of the database to ba
         raise typer.Exit(code=1)
 
 @app.command()
-def api():
-    """Start the REST API server."""
-    console.print("\n[bold cyan]🚀 Starting DBManager REST API...[/bold cyan]\n")
-    console.print("API will be available at: [bold]http://localhost:8000[/bold]")
-    console.print("Swagger docs: [bold]http://localhost:8000/docs[/bold]\n")
+def start_api(background: bool = typer.Option(True, help="Run API in background")):
+    """Start the REST API server as a daemon."""
+    from utils.api_service import start_api_server, is_api_running
     
-    try:
-        # Run uvicorn directly
-        import uvicorn
-        uvicorn.run(
-            "api.main:app",
-            host="0.0.0.0",
-            port=8000,
-            reload=True,
-            log_level="info"
-        )
-    except KeyboardInterrupt:
-        console.print("\n\n[yellow]API server stopped[/yellow]")
-    except Exception as e:
-        console.print(f"\n[red]Error starting API: {e}[/red]")
-        console.print("[yellow]Make sure to install API dependencies:[/yellow]")
-        console.print("  pip install -r requirements-api.txt")
+    if is_api_running():
+        console.print("[yellow]⚠️  API server is already running[/yellow]")
+        console.print("Use 'status-api' to check status or 'restart-api' to restart")
+        return
+    
+    console.print("\n[bold cyan]🚀 Starting DBManager API Server...[/bold cyan]\n")
+    
+    if start_api_server(background=background):
+        if background:
+            console.print("[green]✅ API server started successfully[/green]")
+            console.print("\nAPI available at: [bold]http://localhost:8000[/bold]")
+            console.print("Swagger docs: [bold]http://localhost:8000/docs[/bold]")
+            console.print("\nUse 'stop-api' to stop the server")
+        else:
+            console.print("[yellow]API server stopped[/yellow]")
+    else:
+        console.print("[red]❌ Failed to start API server[/red]")
+        console.print("Check logs: ~/.dbmanager/api.log")
+
+@app.command()
+def stop_api():
+    """Stop the REST API server."""
+    from utils.api_service import stop_api_server, is_api_running
+    
+    if not is_api_running():
+        console.print("[yellow]⚠️  API server is not running[/yellow]")
+        return
+    
+    console.print("\n[bold cyan]🛑 Stopping DBManager API Server...[/bold cyan]\n")
+    
+    if stop_api_server():
+        console.print("[green]✅ API server stopped successfully[/green]")
+    else:
+        console.print("[red]❌ Failed to stop API server[/red]")
+
+@app.command()
+def restart_api():
+    """Restart the REST API server."""
+    from utils.api_service import restart_api_server
+    
+    console.print("\n[bold cyan]🔄 Restarting DBManager API Server...[/bold cyan]\n")
+    
+    if restart_api_server():
+        console.print("[green]✅ API server restarted successfully[/green]")
+        console.print("\nAPI available at: [bold]http://localhost:8000[/bold]")
+        console.print("Swagger docs: [bold]http://localhost:8000/docs[/bold]")
+    else:
+        console.print("[red]❌ Failed to restart API server[/red]")
+
+@app.command()
+def status_api():
+    """Check REST API server status."""
+    from utils.api_service import get_api_status
+    
+    status = get_api_status()
+    
+    console.print("\n[bold cyan]═══ API Server Status ═══[/bold cyan]\n")
+    
+    if status["running"]:
+        console.print("[green]● Running[/green]")
+        console.print(f"PID: {status['pid']}")
+        console.print(f"URL: {status['url']}")
+        console.print(f"Docs: {status['docs']}")
+        if status["log_file"]:
+            console.print(f"Logs: {status['log_file']}")
+    else:
+        console.print("[red]○ Stopped[/red]")
+        console.print("\nStart with: python main.py start-api")
+    
+    console.print()
 
 @app.command()
 def interactive():
