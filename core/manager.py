@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Type
+from typing import List, Dict, Any, Type, Optional
 import os
 from config import ConfigManager, CONFIG_DIR
 from .providers.base import BaseProvider
@@ -8,6 +8,8 @@ from .providers.postgres import PostgresProvider
 from .providers.mysql import MySQLProvider
 from .providers.sqlserver import SQLServerProvider
 from .bucket_manager import BucketManager
+from .backup_utils import save_checksum, verify_backup, verify_checksum
+from .compression import compress_file, get_compression_ratio
 # from .providers.sqlite import SQLiteProvider # To be implemented
 
 BACKUP_ROOT = CONFIG_DIR / "backups"
@@ -157,7 +159,7 @@ class DBManager:
         safe_name = "".join([c for c in db_config["name"] if c.isalnum() or c in ('-', '_')])
         return BACKUP_ROOT / f"{db_id}_{safe_name}"
 
-    def backup_database(self, db_id: int) -> str:
+    def backup_database(self, db_id: int, progress: Optional['BackupProgress'] = None) -> str:
         db_config = self.config_manager.get_database(db_id)
         provider = self.get_provider_instance(db_id)
         backup_dir = self._get_backup_dir(db_id)
@@ -168,8 +170,49 @@ class DBManager:
         s3_bucket_id = db_config.get("s3_bucket_id")
         s3_retention = int(db_config.get("s3_retention", 0))  # 0 = infinite (S3)
 
-        # Run local backup
-        path = provider.backup(str(backup_dir))
+        # Run local backup with progress tracking
+        path = provider.backup(str(backup_dir), progress=progress)
+        
+        # Generate checksum for backup integrity
+        try:
+            checksum_file = save_checksum(path)
+            print(f"✅ Checksum generated: {os.path.basename(checksum_file)}")
+        except Exception as e:
+            print(f"⚠️  Checksum generation failed: {e}")
+            checksum_file = None
+        
+        # Compress backup if enabled
+        compression_settings = self.config_manager.get_compression_settings()
+        if compression_settings.get("enabled", False):
+            try:
+                algorithm = compression_settings.get("algorithm", "gzip")
+                level = compression_settings.get("level", 6)
+                
+                print(f"🗜️  Compressing with {algorithm} (level {level})...")
+                compressed_path = compress_file(path, algorithm=algorithm, level=level, remove_original=True)
+                
+                # Calculate compression ratio
+                # Since original is removed, we need to use file sizes from before compression
+                original_size = os.path.getsize(compressed_path) / get_compression_ratio(path, compressed_path) if os.path.exists(compressed_path) else 0
+                
+                # Update path to compressed file
+                old_path = path
+                path = compressed_path
+                
+                # Update checksum file reference
+                if checksum_file:
+                    # Rename checksum file to match compressed file
+                    old_checksum = checksum_file
+                    checksum_file = f"{compressed_path}.sha256"
+                    try:
+                        os.rename(old_checksum, checksum_file)
+                    except:
+                        # If rename fails, regenerate checksum for compressed file
+                        checksum_file = save_checksum(compressed_path)
+                
+                print(f"✅ Compressed: {os.path.basename(compressed_path)}")
+            except Exception as e:
+                print(f"⚠️  Compression failed: {e}, using uncompressed backup")
         
         # Upload to S3 if configured
         if s3_enabled and s3_bucket_id:
@@ -189,10 +232,16 @@ class DBManager:
                     
                     if storage.upload_file(path, s3_key, metadata):
                         print(f"✅ Backup uploaded to S3: {s3_key}")
+                        
+                        # Upload checksum file if it exists
+                        if checksum_file and Path(checksum_file).exists():
+                            checksum_s3_key = f"{s3_key}.sha256"
+                            if storage.upload_file(checksum_file, checksum_s3_key):
+                                print(f"✅ Checksum uploaded to S3")
                     else:
-                        print(f"⚠️ S3 upload failed, local backup retained")
+                        print(f"⚠️  S3 upload failed, local backup retained")
             except Exception as e:
-                print(f"⚠️ S3 upload error: {e}, local backup retained")
+                print(f"⚠️  S3 upload error: {e}, local backup retained")
 
         # Handle local retention
         if retention > 0:
@@ -267,10 +316,37 @@ class DBManager:
         # Sort by date desc
         return sorted(backups, key=lambda x: x["date"], reverse=True)
 
-    def restore_database(self, db_id: int, backup_file: str):
+    def verify_backup_integrity(self, backup_path: str) -> dict:
+        """
+        Verify backup integrity using checksum.
+        
+        Args:
+            backup_path: Path to backup file
+        
+        Returns:
+            Verification result dictionary with status and details
+        """
+        return verify_backup(backup_path)
+    
+    def restore_database(self, db_id: int, backup_file: str, progress: Optional['BackupProgress'] = None):
         provider = self.get_provider_instance(db_id)
         # Verify file exists
         if not Path(backup_file).exists():
             raise FileNotFoundError(f"Backup file {backup_file} not found")
         
-        return provider.restore(backup_file)
+        # Verify checksum if available
+        checksum_file = Path(f"{backup_file}.sha256")
+        if checksum_file.exists():
+            print(f"🔍 Verifying backup integrity...")
+            try:
+                if verify_checksum(backup_file):
+                    print(f"✅ Checksum verified - backup is intact")
+                else:
+                    raise ValueError("Checksum verification failed - backup may be corrupted")
+            except Exception as e:
+                print(f"⚠️  Checksum verification failed: {e}")
+                response = input("Continue with restore anyway? (y/n): ").lower().strip()
+                if response != 'y':
+                    raise RuntimeError("Restore cancelled due to checksum mismatch")
+        
+        return provider.restore(backup_file, progress=progress)

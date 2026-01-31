@@ -3,6 +3,7 @@ import subprocess
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from .base import BaseProvider
 
 class MySQLProvider(BaseProvider):
@@ -22,13 +23,20 @@ class MySQLProvider(BaseProvider):
         except Exception:
             return False
 
-    def backup(self, backup_dir: str) -> str:
+    def backup(self, backup_dir: str, progress: Optional['BackupProgress'] = None) -> str:
+        if progress:
+            progress.start(f"Starting MySQL backup for {self.name}")
+            progress.set_steps(2)  # Dump, Verify
+        
         params = self.config["params"]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{self.config['name']}_{timestamp}.sql"
         filepath = os.path.join(backup_dir, filename)
         
         Path(backup_dir).mkdir(parents=True, exist_ok=True)
+
+        if progress:
+            progress.update(message=f"Dumping database {params['database']}...", step="Dumping")
 
         # Complete mysqldump with all database objects
         cmd = [
@@ -56,13 +64,24 @@ class MySQLProvider(BaseProvider):
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             
+            if progress:
+                progress.step_completed("Database dumped")
+            
             # Verify the backup file was created and has content
             if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+                if progress:
+                    progress.fail("Backup file was not created or is empty")
                 raise RuntimeError(f"Backup file was not created or is empty: {filepath}")
+            
+            if progress:
+                progress.step_completed("Verification complete")
+                progress.complete(f"Backup completed: {filename}")
             
             return filepath
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr if e.stderr else str(e)
+            if progress:
+                progress.fail(f"mysqldump failed: {error_msg}")
             raise RuntimeError(f"Backup failed: {error_msg}")
     
     def verify_backup(self, backup_file: str) -> bool:
@@ -78,8 +97,15 @@ class MySQLProvider(BaseProvider):
         except Exception:
             return False
 
-    def restore(self, backup_file: str) -> bool:
+    def restore(self, backup_file: str, progress: Optional['BackupProgress'] = None) -> bool:
+        if progress:
+            progress.start(f"Starting MySQL restore for {self.name}")
+            progress.set_steps(1)  # Restore
+        
         params = self.config["params"]
+        
+        if progress:
+            progress.update(message=f"Restoring database {params['database']}...", step="Restoring")
         
         # MySQL/MariaDB consume dump via stdin
         cmd = [
@@ -94,6 +120,14 @@ class MySQLProvider(BaseProvider):
         try:
             with open(backup_file, "r") as f:
                 subprocess.run(cmd, stdin=f, check=True, capture_output=True)
+            
+            if progress:
+                progress.step_completed("Database restored")
+                progress.complete("Restore completed successfully")
+            
             return True
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Restore failed: {e.stderr.decode()}")
+            error_msg = e.stderr.decode() if hasattr(e.stderr, 'decode') else str(e)
+            if progress:
+                progress.fail(f"Restore failed: {error_msg}")
+            raise RuntimeError(f"Restore failed: {error_msg}")

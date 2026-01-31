@@ -5,6 +5,7 @@ import io
 import tarfile
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from .base import BaseProvider
 
 class SQLServerProvider(BaseProvider):
@@ -74,7 +75,7 @@ class SQLServerProvider(BaseProvider):
             # Docker not available or other error
             return False
 
-    def backup(self, backup_dir: str) -> str:
+    def backup(self, backup_dir: str, progress: Optional['BackupProgress'] = None) -> str:
         """
         Triple-priority backup strategy (ordered by completeness):
         1. mssql-scripter (BEST - complete schema+data, works on x86/AMD64)
@@ -460,7 +461,7 @@ class SQLServerProvider(BaseProvider):
             except:
                 return False
 
-    def restore(self, backup_file: str) -> bool:
+    def restore(self, backup_file: str, progress: Optional['BackupProgress'] = None) -> bool:
         params = self.config["params"]
         
         if backup_file.endswith('.bak'):

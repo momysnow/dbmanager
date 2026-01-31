@@ -98,11 +98,13 @@ def db_actions_menu(db_id: int):
             ])
         
         choices.extend([
+            Separator("─── Verify ───"),
+            Choice(value="verify", name="Verify Backup Integrity"),
             Separator("─── Config ───"),
             Choice(value="edit", name="Edit Configuration"),
             Choice(value="delete", name="Delete Database"),
             Separator(),
-            Choice(value="back", name="Back to Databases List"),
+            Choice(value="back", name="← Back to Databases List"),
         ])
 
         action = get_selection("Choose Action", choices)
@@ -131,6 +133,9 @@ def db_actions_menu(db_id: int):
             restore_from_s3_wizard(db_id)
         elif action == "sync":
             sync_backups_wizard(db_id)
+        elif action == "verify":
+            verify_backup_wizard(db_id)
+            get_input("Press Enter to continue...")
         elif action == "delete":
             if delete_database_wizard(db_id):
                 break
@@ -152,10 +157,45 @@ def check_status(db_id: int):
         print_error(f"Error: {e}")
 
 def perform_manual_backup(db_id: int):
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    from core.progress import BackupProgress
+    
     try:
-        print_info("Starting backup...")
-        path = manager.backup_database(db_id)
-        print_success(f"Backup saved: {path}")
+        db = manager.config_manager.get_database(db_id)
+        
+        # Create progress tracker
+        backup_progress = BackupProgress()
+        
+        # Display progress with rich
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console
+        ) as progress:
+            # Add task for tracking
+            task_id = progress.add_task(f"Backing up {db['name']}...", total=100)
+            
+            def update_callback(bp: BackupProgress):
+                """Update rich progress bar from BackupProgress"""
+                progress.update(
+                    task_id,
+                    completed=bp.percentage,
+                    description=f"[bold blue]{bp.message}"
+                )
+            
+            # Set callback
+            backup_progress._callback = update_callback
+            
+            # Start backup with progress tracking
+            path = manager.backup_database(db_id, progress=backup_progress)
+            
+            # Show final status
+            if backup_progress.status.value == "completed":
+                print_success(f"Backup saved: {path}")
+            else:
+                print_error(f"Backup status: {backup_progress.status.value}")
     except Exception as e:
         print_error(f"Backup failed: {e}")
 
@@ -230,6 +270,77 @@ def view_s3_backups(db_id: int):
         console.print(f"\n[dim]Total: {len(s3_backups)} backup(s) on S3[/dim]")
     except Exception as e:
         print_error(f"Failed to list S3 backups: {e}")
+
+def verify_backup_wizard(db_id: int):
+    """Verify backup integrity using checksum"""
+    console.print("\n[bold cyan]=== Verify Backup Integrity ===[/bold cyan]\n")
+    
+    backups = manager.list_backups(db_id)
+    if not backups:
+        print_info("No local backups found")
+        return
+    
+    # Display backups with checksum status
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("#", style="dim")
+    table.add_column("Filename")
+    table.add_column("Date")
+    table.add_column("Size (MB)")
+    table.add_column("Checksum")
+    
+    from pathlib import Path
+    for i, backup in enumerate(backups, 1):
+        checksum_file = Path(f"{backup['path']}.sha256")
+        checksum_status = "✅" if checksum_file.exists() else "❌"
+        
+        table.add_row(
+            str(i),
+            backup['filename'],
+            backup['date'].strftime('%Y-%m-%d %H:%M'),
+            f"{backup['size_mb']:.2f}",
+            checksum_status
+        )
+    
+    console.print(table)
+    console.print(f"\n[dim]✅ = Has checksum  ❌ = No checksum[/dim]\n")
+    
+    # Ask user to select a backup to verify
+    choices = []
+    for b in backups:
+        checksum_file = Path(f"{b['path']}.sha256")
+        if checksum_file.exists():
+            label = f"{b['date'].strftime('%Y-%m-%d %H:%M')} | {b['filename']}"
+            choices.append(Choice(value=b['path'], name=label))
+    
+    if not choices:
+        print_info("No backups with checksums found")
+        return
+    
+    choices.append(Separator())
+    choices.append(Choice(value="cancel", name="← Cancel"))
+    
+    backup_path = get_selection("Select backup to verify", choices)
+    
+    if backup_path == "cancel":
+        return
+    
+    # Perform verification
+    print_info("Verifying backup integrity...")
+    try:
+        result = manager.verify_backup_integrity(backup_path)
+        
+        if result['valid']:
+            print_success("✅ Backup is valid and intact!")
+            console.print(f"   File size: {result['file_size'] / (1024*1024):.2f} MB")
+            if result['checksum_valid']:
+                print_success("   Checksum: VERIFIED")
+        else:
+            print_error("❌ Backup verification FAILED")
+            for error in result['errors']:
+                console.print(f"   • {error}", style="red")
+    except Exception as e:
+        print_error(f"Verification error: {e}")
+
 
 def restore_wizard(db_id: int):
     try:

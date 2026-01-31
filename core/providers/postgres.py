@@ -3,6 +3,7 @@ import subprocess
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from .base import BaseProvider
 
 class PostgresProvider(BaseProvider):
@@ -22,18 +23,33 @@ class PostgresProvider(BaseProvider):
         except Exception:
             return False
 
-    def backup(self, backup_dir: str) -> str:
+    def backup(self, backup_dir: str, progress: Optional['BackupProgress'] = None) -> str:
+        if progress:
+            progress.start(f"Starting PostgreSQL backup for {self.name}")
+            progress.set_steps(3)  # Prepare, Dump, Verify
+        
         params = self.config["params"]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Use .dump extension for custom format (compressed)
         filename = f"{self.config['name']}_{timestamp}.dump"
         filepath = os.path.join(backup_dir, filename)
         
+        # Step 1: Prepare
+        if progress:
+            progress.update(message="Preparing backup directory...", step="Preparing")
+        
         # Ensure directory exists
         Path(backup_dir).mkdir(parents=True, exist_ok=True)
 
         env = os.environ.copy()
         env["PGPASSWORD"] = params["password"]
+        
+        if progress:
+            progress.step_completed("Preparation complete")
+
+        # Step 2: Dump database
+        if progress:
+            progress.update(message=f"Dumping database {params['database']}...", step="Dumping")
 
         # Use custom format (-F c) for compression and better performance
         # This is the native PostgreSQL backup format
@@ -51,13 +67,27 @@ class PostgresProvider(BaseProvider):
         try:
             result = subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
             
-            # Verify the backup file was created and has content
+            if progress:
+                progress.step_completed("Database dumped")
+            
+            # Step 3: Verify the backup file was created and has content
+            if progress:
+                progress.update(message="Verifying backup file...", step="Verifying")
+            
             if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+                if progress:
+                    progress.fail("Backup file was not created or is empty")
                 raise RuntimeError(f"Backup file was not created or is empty: {filepath}")
+            
+            if progress:
+                progress.step_completed("Verification complete")
+                progress.complete(f"Backup completed: {filename}")
             
             return filepath
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr if e.stderr else str(e)
+            if progress:
+                progress.fail(f"pg_dump failed: {error_msg}")
             raise RuntimeError(f"Backup failed: {error_msg}")
     
     def verify_backup(self, backup_file: str) -> bool:
@@ -79,13 +109,28 @@ class PostgresProvider(BaseProvider):
         except subprocess.CalledProcessError:
             return False
 
-    def restore(self, backup_file: str) -> bool:
+    def restore(self, backup_file: str, progress: Optional['BackupProgress'] = None) -> bool:
+        if progress:
+            progress.start(f"Starting PostgreSQL restore for {self.name}")
+            progress.set_steps(3)  # Detect format, Restore, Verify
+        
         params = self.config["params"]
         env = os.environ.copy()
         env["PGPASSWORD"] = params["password"]
 
-        # Auto-detect format: .dump = custom format, .sql = plain SQL
+        # Step 1: Auto-detect format
+        if progress:
+            progress.update(message="Detecting backup format...", step="Detecting")
+        
         is_custom_format = backup_file.endswith('.dump')
+        
+        if progress:
+            format_type = "custom (compressed)" if is_custom_format else "plain SQL"
+            progress.step_completed(f"Format detected: {format_type}")
+        
+        # Step 2: Restore database
+        if progress:
+            progress.update(message=f"Restoring database {params['database']}...", step="Restoring")
         
         if is_custom_format:
             # Use pg_restore for custom format
@@ -113,7 +158,14 @@ class PostgresProvider(BaseProvider):
 
         try:
             subprocess.run(cmd, env=env, check=True, capture_output=True)
+            
+            if progress:
+                progress.step_completed("Database restored")
+                progress.complete("Restore completed successfully")
+            
             return True
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.decode() if hasattr(e.stderr, 'decode') else str(e)
+            if progress:
+                progress.fail(f"Restore failed: {error_msg}")
             raise RuntimeError(f"Restore failed: {error_msg}")
