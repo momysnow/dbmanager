@@ -109,14 +109,16 @@ class DBManager:
             return []
         
         backups = []
-        for f in backup_dir.glob("*.sql"):
-            stat = f.stat()
-            backups.append({
-                "filename": f.name,
-                "path": str(f),
-                "date": datetime.fromtimestamp(stat.st_mtime),
-                "size_mb": stat.st_size / (1024 * 1024)
-            })
+        # Support multiple backup formats: .sql, .dump (PostgreSQL), .bak (SQL Server)
+        for pattern in ["*.sql", "*.dump", "*.bak"]:
+            for f in backup_dir.glob(pattern):
+                stat = f.stat()
+                backups.append({
+                    "filename": f.name,
+                    "path": str(f),
+                    "date": datetime.fromtimestamp(stat.st_mtime),
+                    "size_mb": stat.st_size / (1024 * 1024)
+                })
         
         # Sort by date desc
         return sorted(backups, key=lambda x: x["date"], reverse=True)

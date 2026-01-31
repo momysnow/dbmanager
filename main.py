@@ -188,6 +188,11 @@ def add_database_wizard():
         "password": password,
         "database": database
     }
+    
+    # SQL Server specific options
+    if provider == "sqlserver":
+        trust_cert = get_confirm("Trust SSL Certificate?", default=True)
+        params["trust_certificate"] = trust_cert
 
     try:
         manager.add_database(name, provider, params)
@@ -239,6 +244,12 @@ def edit_database_wizard(db_id: int):
         "password": password,
         "database": database
     }
+    
+    # SQL Server specific options
+    if provider == "sqlserver":
+        current_trust = params.get("trust_certificate", True)
+        trust_cert = get_confirm("Trust SSL Certificate?", default=current_trust)
+        new_params["trust_certificate"] = trust_cert
 
     try:
         if manager.update_database(db_id, name, provider, new_params, int(retention)):

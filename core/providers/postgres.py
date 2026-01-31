@@ -25,7 +25,8 @@ class PostgresProvider(BaseProvider):
     def backup(self, backup_dir: str) -> str:
         params = self.config["params"]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{self.config['name']}_{timestamp}.sql"
+        # Use .dump extension for custom format (compressed)
+        filename = f"{self.config['name']}_{timestamp}.dump"
         filepath = os.path.join(backup_dir, filename)
         
         # Ensure directory exists
@@ -34,38 +35,85 @@ class PostgresProvider(BaseProvider):
         env = os.environ.copy()
         env["PGPASSWORD"] = params["password"]
 
+        # Use custom format (-F c) for compression and better performance
+        # This is the native PostgreSQL backup format
         cmd = [
             "pg_dump",
             "-h", params["host"],
             "-p", params["port"],
             "-U", params["user"],
-            "-F", "p", 
+            "-F", "c",  # Custom format (compressed, native)
             "-f", filepath,
-            params["database"]
+            params["database"],
+            "--verbose"  # Show progress
         ]
 
         try:
-            subprocess.run(cmd, env=env, check=True, capture_output=True)
+            result = subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
+            
+            # Verify the backup file was created and has content
+            if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+                raise RuntimeError(f"Backup file was not created or is empty: {filepath}")
+            
             return filepath
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Backup failed: {e.stderr.decode()}")
+            error_msg = e.stderr if e.stderr else str(e)
+            raise RuntimeError(f"Backup failed: {error_msg}")
+    
+    def verify_backup(self, backup_file: str) -> bool:
+        """Verify the integrity of a PostgreSQL backup file"""
+        params = self.config["params"]
+        env = os.environ.copy()
+        env["PGPASSWORD"] = params["password"]
+        
+        # Use pg_restore with --list to verify the backup
+        cmd = [
+            "pg_restore",
+            "--list",
+            backup_file
+        ]
+        
+        try:
+            subprocess.run(cmd, env=env, check=True, capture_output=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
     def restore(self, backup_file: str) -> bool:
         params = self.config["params"]
         env = os.environ.copy()
         env["PGPASSWORD"] = params["password"]
 
-        cmd = [
-            "psql",
-            "-h", params["host"],
-            "-p", params["port"],
-            "-U", params["user"],
-            "-d", params["database"],
-            "-f", backup_file
-        ]
+        # Auto-detect format: .dump = custom format, .sql = plain SQL
+        is_custom_format = backup_file.endswith('.dump')
+        
+        if is_custom_format:
+            # Use pg_restore for custom format
+            cmd = [
+                "pg_restore",
+                "-h", params["host"],
+                "-p", params["port"],
+                "-U", params["user"],
+                "-d", params["database"],
+                "--clean",  # Drop existing objects before restore
+                "--if-exists",  # Don't error if objects don't exist
+                "--verbose",  # Show progress
+                backup_file
+            ]
+        else:
+            # Use psql for plain SQL files
+            cmd = [
+                "psql",
+                "-h", params["host"],
+                "-p", params["port"],
+                "-U", params["user"],
+                "-d", params["database"],
+                "-f", backup_file
+            ]
 
         try:
             subprocess.run(cmd, env=env, check=True, capture_output=True)
             return True
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Restore failed: {e.stderr.decode()}")
+            error_msg = e.stderr.decode() if hasattr(e.stderr, 'decode') else str(e)
+            raise RuntimeError(f"Restore failed: {error_msg}")

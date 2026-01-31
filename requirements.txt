@@ -7,3 +7,5 @@ python-dotenv
 pymssql
 mssql-scripter
 InquirerPy
+docker
+

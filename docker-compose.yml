@@ -4,6 +4,10 @@ services:
     container_name: dbmanager
     volumes:
       - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock # Docker API access
     environment:
       - DBMANAGER_DATA_DIR=/app/data
+    # Enable TTY for interactive mode
+    tty: true
+    stdin_open: true
     restart: unless-stopped

@@ -6,7 +6,6 @@ FROM python:3.10-slim-bullseye
 # cron: for scheduling
 # curl, gnupg2, ca-certificates: for adding MS repos
 RUN apt-get update && apt-get install -y \
-    postgresql-client \
     mariadb-client \
     cron \
     nano \
@@ -16,6 +15,13 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     libicu-dev \
     apt-transport-https \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add PostgreSQL APT repository and install PostgreSQL 18 client tools
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y postgresql-client-18 \
     && rm -rf /var/lib/apt/lists/*
 
 # Fix for .NET Core (mssql-scripter) globalization issue

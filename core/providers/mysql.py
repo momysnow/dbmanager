@@ -30,6 +30,7 @@ class MySQLProvider(BaseProvider):
         
         Path(backup_dir).mkdir(parents=True, exist_ok=True)
 
+        # Complete mysqldump with all database objects
         cmd = [
             "mysqldump",
             "-h", params["host"],
@@ -37,14 +38,45 @@ class MySQLProvider(BaseProvider):
             "-u", params["user"],
             f"--password={params['password']}",
             params["database"],
-            f"--result-file={filepath}"
+            "--result-file", filepath,
+            # Advanced options for complete backup
+            "--single-transaction",  # Consistent snapshot without locking tables
+            "--routines",  # Include stored procedures and functions
+            "--triggers",  # Include triggers
+            "--events",  # Include scheduled events
+            "--add-drop-database",  # Add DROP DATABASE before CREATE
+            "--add-drop-table",  # Add DROP TABLE before CREATE
+            "--create-options",  # Include all CREATE TABLE options
+            "--extended-insert",  # Use multi-row INSERT (faster restore)
+            "--set-charset",  # Add SET NAMES to output
+            "--comments",  # Add informational comments
+            "--dump-date"  # Add dump date as comment
         ]
 
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            
+            # Verify the backup file was created and has content
+            if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+                raise RuntimeError(f"Backup file was not created or is empty: {filepath}")
+            
             return filepath
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Backup failed: {e.stderr.decode()}")
+            error_msg = e.stderr if e.stderr else str(e)
+            raise RuntimeError(f"Backup failed: {error_msg}")
+    
+    def verify_backup(self, backup_file: str) -> bool:
+        """Verify the integrity of a MySQL backup file"""
+        # Check if file exists and is valid SQL
+        try:
+            with open(backup_file, 'r') as f:
+                content = f.read(1000)  # Read first 1000 chars
+                # Check for MySQL dump header
+                if '-- MySQL dump' in content or 'CREATE TABLE' in content:
+                    return True
+            return False
+        except Exception:
+            return False
 
     def restore(self, backup_file: str) -> bool:
         params = self.config["params"]

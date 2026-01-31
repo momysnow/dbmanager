@@ -33,6 +33,7 @@ services:
     container_name: dbmanager-sqlserver
     environment:
       ACCEPT_EULA: "Y"
+      # Root user: sa
       MSSQL_SA_PASSWORD: "YourStrong@Password"
     volumes:
       - sqlserver_data:/var/opt/mssql
