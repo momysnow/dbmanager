@@ -53,6 +53,7 @@ def settings_menu():
             Separator(),
             Choice(value="compression", name="Configure Compression"),
             Choice(value="encryption", name="Configure Encryption"),
+            Choice(value="notifications", name="Configure Notifications"),
             Separator(),
             Choice(value="back", name="← Back to Main Menu"),
         ]
@@ -111,6 +112,10 @@ def settings_menu():
         
         elif action == "encryption":
             encryption_config_menu()
+        
+        elif action == "notifications":
+            from cli.notifications import notification_menu
+            notification_menu()
             
         elif action == "back":
             break

@@ -20,6 +20,7 @@ class DBManager:
     def __init__(self):
         self.config_manager = ConfigManager()
         self.bucket_manager = BucketManager(self.config_manager)
+        self.notification_manager = NotificationManager(self.config_manager.config)
         
         # Initialize config sync
         from .config_sync import ConfigSync
