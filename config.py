@@ -19,7 +19,14 @@ class ConfigManager:
             default_config = {
                 "databases": [],
                 "s3_buckets": [],
-                "config_sync_bucket_id": None
+                "config_sync_bucket_id": None,
+                "global_settings": {
+                    "compression": {
+                        "enabled": False,
+                        "algorithm": "gzip",
+                        "level": 6
+                    }
+                }
             }
             with open(CONFIG_FILE, "w") as f:
                 json.dump(default_config, f, indent=4)
@@ -85,3 +92,45 @@ class ConfigManager:
                 self.save_config()
                 return True
         return False
+    
+    def get_global_settings(self) -> Dict[str, Any]:
+        """Get global settings (compression, etc.)"""
+        return self.config.get("global_settings", {
+            "compression": {
+                "enabled": False,
+                "algorithm": "gzip",
+                "level": 6
+            }
+        })
+    
+    def update_global_settings(self, settings: Dict[str, Any]):
+        """Update global settings"""
+        if "global_settings" not in self.config:
+            self.config["global_settings"] = {}
+        self.config["global_settings"].update(settings)
+        self.save_config()
+    
+    def get_compression_settings(self) -> Dict[str, Any]:
+        """Get compression settings"""
+        global_settings = self.get_global_settings()
+        return global_settings.get("compression", {
+            "enabled": False,
+            "algorithm": "gzip",
+            "level": 6
+        })
+    
+    def update_compression_settings(self, enabled: bool = None, 
+                                   algorithm: str = None, level: int = None):
+        """Update compression settings"""
+        settings = self.get_compression_settings()
+        
+        if enabled is not None:
+            settings["enabled"] = enabled
+        if algorithm is not None:
+            settings["algorithm"] = algorithm
+        if level is not None:
+            settings["level"] = level
+        
+        global_settings = self.get_global_settings()
+        global_settings["compression"] = settings
+        self.update_global_settings(global_settings)

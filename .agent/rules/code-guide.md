@@ -8,39 +8,6 @@ trigger: always_on
 
 DBManager è un tool CLI per la gestione di backup database multi-provider (PostgreSQL, MySQL, SQL Server) con supporto S3.
 
-## Project Structure
-
-```
-dbmanager/
-├── main.py              # Entry point CLI (minimale)
-├── config.py            # Gestione config.json
-├── cli/                 # Moduli CLI (max 500 linee per file)
-│   ├── __init__.py      # Shared state (console, manager)
-│   ├── database.py      # Menu e wizard database
-│   ├── s3.py            # Menu e wizard S3
-│   ├── schedule.py      # Menu scheduling
-│   └── settings.py      # Menu settings
-├── core/                # Business logic
-│   ├── manager.py       # DBManager principale
-│   ├── bucket_manager.py
-│   ├── bucket_migrator.py
-│   ├── config_sync.py
-│   ├── s3_storage.py
-│   ├── cron.py
-│   └── providers/       # Provider database
-│       ├── base.py      # Abstract base class
-│       ├── postgres.py
-│       ├── mysql.py
-│       └── sqlserver.py
-├── utils/
-│   └── ui.py            # Helper UI (print_*, get_*)
-├── data/                # Volume persistente
-│   ├── config.json      # Configurazione
-│   └── backups/         # Backup locali
-└── test/                # Test infrastructure
-    └── s3/              # Docker compose per Minio/Garage
-```
-
 ## Coding Standards
 
 ### File Size
@@ -113,30 +80,11 @@ def add_something_wizard():
     get_input("Press Enter...")
 ```
 
-## Dependencies
-
-### Core
-- `typer` - CLI framework
-- `rich` - Console output formatting
-- `InquirerPy` - Interactive prompts
-- `boto3` - S3 storage
-
-### Database Clients
-- `psycopg2-binary` - PostgreSQL
-- `mysql-connector-python` - MySQL  
-- `pymssql` - SQL Server
-
 ## Docker
 
 ### Build & Run
 ```bash
-docker-compose up -d --build
-docker attach dbmanager
-```
-
-### Rebuild after changes
-```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ## Git Workflow
@@ -158,41 +106,6 @@ Types:
 ### Commit Granularity
 - Un commit per feature/fix logico
 - Non mescolare refactoring con nuove feature
-
-## Testing
-
-### S3 Testing
-```bash
-cd test/s3
-docker-compose -f docker-compose-minio.yml up -d
-```
-
-Poi configura bucket in app:
-- Endpoint: `http://host.docker.internal:9000`
-- Access Key: `minioadmin`
-- Secret Key: `minioadmin`
-
-## Configuration
-
-### config.json Structure
-```json
-{
-  "databases": [
-    {
-      "id": 1,
-      "name": "My DB",
-      "provider": "postgres",
-      "params": {...},
-      "retention": 5,
-      "s3_enabled": true,
-      "s3_bucket_id": 1,
-      "s3_retention": 10
-    }
-  ],
-  "s3_buckets": [...],
-  "config_sync_bucket_id": null
-}
-```
 
 ## Error Handling
 
