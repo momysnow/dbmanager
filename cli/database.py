@@ -94,6 +94,7 @@ def db_actions_menu(db_id: int):
             choices.extend([
                 Choice(value="list_s3", name="List S3 Backups"),
                 Choice(value="restore_s3", name="Restore from S3"),
+                Choice(value="sync", name="Sync Backups (Local ↔ S3)"),
             ])
         
         choices.extend([
@@ -128,6 +129,8 @@ def db_actions_menu(db_id: int):
             get_input("Press Enter to continue...")
         elif action == "restore_s3":
             restore_from_s3_wizard(db_id)
+        elif action == "sync":
+            sync_backups_wizard(db_id)
         elif action == "delete":
             if delete_database_wizard(db_id):
                 break
@@ -336,6 +339,99 @@ def delete_database_wizard(db_id: int) -> bool:
         print_success("Deleted.")
         return True
     return False
+
+def sync_backups_wizard(db_id: int):
+    """Sync backups between local and S3"""
+    print_header()
+    console.print("\n[bold cyan]═══ Sync Backups ═══[/bold cyan]\n")
+    
+    db = manager.config_manager.get_database(db_id)
+    bucket_id = db.get('s3_bucket_id')
+    
+    if not bucket_id:
+        print_error("No S3 bucket configured")
+        get_input("Press Enter to continue...")
+        return
+    
+    try:
+        storage = manager.bucket_manager.get_storage(bucket_id)
+        if not storage:
+            print_error("Failed to connect to S3")
+            get_input("Press Enter to continue...")
+            return
+        
+        # Get local backups
+        local_backups = manager.list_backups(db_id)
+        local_files = {b['filename'] for b in local_backups}
+        
+        # Get S3 backups
+        prefix = f"backups/{db_id}/"
+        s3_backups = storage.list_files(prefix)
+        s3_files = {b['key'].split('/')[-1] for b in s3_backups}
+        
+        # Calculate differences
+        only_local = local_files - s3_files
+        only_s3 = s3_files - local_files
+        both = local_files & s3_files
+        
+        # Show status
+        console.print(f"[bold]Local only:[/bold] {len(only_local)} backup(s)")
+        console.print(f"[bold]S3 only:[/bold] {len(only_s3)} backup(s)")
+        console.print(f"[bold]Both:[/bold] {len(both)} backup(s)")
+        console.print()
+        
+        if not only_local and not only_s3:
+            print_success("✅ Backups are already synchronized!")
+            get_input("Press Enter to continue...")
+            return
+        
+        # Menu choices
+        choices = [
+            Choice(value="back", name="← Back"),
+            Separator(),
+        ]
+        
+        if only_local:
+            choices.append(Choice(value="upload", name=f"Upload {len(only_local)} local backup(s) to S3"))
+        if only_s3:
+            choices.append(Choice(value="download", name=f"Download {len(only_s3)} backup(s) from S3"))
+        if only_local and only_s3:
+            choices.append(Choice(value="full", name=f"Full Sync (upload + download)"))
+        
+        action = get_selection("Sync Options", choices)
+        
+        if action == "back":
+            return
+        
+        # Get backup directory
+        backup_dir = manager._get_backup_dir(db_id)
+        
+        if action in ["upload", "full"]:
+            console.print("\n[yellow]Uploading to S3...[/yellow]")
+            uploaded = 0
+            for filename in only_local:
+                local_path = backup_dir / filename
+                s3_key = f"backups/{db_id}/{filename}"
+                if storage.upload_file(str(local_path), s3_key):
+                    uploaded += 1
+            print_success(f"Uploaded {uploaded}/{len(only_local)} backup(s)")
+        
+        if action in ["download", "full"]:
+            console.print("\n[yellow]Downloading from S3...[/yellow]")
+            downloaded = 0
+            for filename in only_s3:
+                s3_key = f"backups/{db_id}/{filename}"
+                local_path = backup_dir / filename
+                if storage.download_file(s3_key, str(local_path)):
+                    downloaded += 1
+            print_success(f"Downloaded {downloaded}/{len(only_s3)} backup(s)")
+        
+        print_success("\n✅ Sync complete!")
+        
+    except Exception as e:
+        print_error(f"Sync failed: {e}")
+    
+    get_input("Press Enter to continue...")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATABASE ADD/EDIT WIZARDS
