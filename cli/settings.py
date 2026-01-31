@@ -51,6 +51,9 @@ def settings_menu():
             Choice(value="sync_now", name="Sync Config to S3 Now"),
             Choice(value="download", name="Download Config from S3"),
             Separator(),
+            Choice(value="export", name="📤 Export Configuration"),
+            Choice(value="import", name="📥 Import Configuration"),
+            Separator(),
             Choice(value="compression", name="Configure Compression"),
             Choice(value="encryption", name="Configure Encryption"),
             Choice(value="notifications", name="Configure Notifications"),
@@ -100,12 +103,13 @@ def settings_menu():
             get_input("Press Enter to continue...")
             
         elif action == "download":
-            if current_bucket_id:
-                console.print("[yellow]Downloading config from S3...[/yellow]")
-                manager.config_sync.sync_from_s3()
-            else:
-                print_info("Config sync not configured")
-            get_input("Press Enter to continue...")
+            download_config_from_s3()
+        
+        elif action == "export":
+            export_configuration()
+        
+        elif action == "import":
+            import_configuration()
         
         elif action == "compression":
             compression_config_menu()
@@ -120,6 +124,100 @@ def settings_menu():
         elif action == "back":
             break
 
+
+def export_configuration():
+    """Export configuration wizard"""
+    from utils.config_export import ConfigExporter
+    from utils.ui import print_success, print_error
+    
+    print_header()
+    console.print("\n[bold cyan]═══ Export Configuration ═══[/bold cyan]\n")
+    
+    include_backups = get_confirm("Include backup files in export?", default=False)
+    output_path = get_input("Export path (leave empty for default):")
+    
+    try:
+        exporter = ConfigExporter(manager.config_manager)
+        
+        if output_path and output_path.endswith('.json'):
+            # JSON export (config only)
+            path = exporter.export_to_json(output_path if output_path else None)
+            print_success(f"Configuration exported to: {path}")
+        else:
+            # ZIP export
+            path = exporter.export_config(
+                output_path if output_path else None,
+                include_backups=include_backups
+            )
+            print_success(f"Configuration exported to: {path}")
+            
+            if include_backups:
+                console.print("[dim]Backup files included[/dim]")
+    
+    except Exception as e:
+        print_error(f"Export failed: {e}")
+
+
+def import_configuration():
+    """Import configuration wizard"""
+    from utils.config_export import ConfigExporter
+    from utils.ui import print_success, print_error, print_info
+    
+    print_header()
+    console.print("\n[bold cyan]═══ Import Configuration ═══[/bold cyan]\n")
+    
+    print_info("⚠️  Warning: This will modify your current configuration!")
+    console.print()
+    
+    import_path = get_input("Import file path:")
+    
+    if not import_path:
+        print_info("Import cancelled")
+        return
+    
+    merge = get_confirm("Merge with existing configuration? (No = replace)", default=True)
+    
+    # Check if export includes backups
+    from pathlib import Path
+    import zipfile
+    
+    restore_backups = False
+    if Path(import_path).suffix == '.zip':
+        try:
+            with zipfile.ZipFile(import_path, 'r') as zipf:
+                if 'backups/' in zipf.namelist() or any('backups' in name for name in zipf.namelist()):
+                    restore_backups = get_confirm("Export contains backups. Restore them?", default=False)
+        except:
+            pass
+    
+    if not get_confirm(f"Confirm import from {import_path}?", default=False):
+        print_info("Import cancelled")
+        return
+    
+    try:
+        exporter = ConfigExporter(manager.config_manager)
+        
+        if import_path.endswith('.json'):
+            summary = exporter.import_from_json(import_path, merge=merge)
+        else:
+            summary = exporter.import_config(import_path, merge=merge, restore_backups=restore_backups)
+        
+        print_success("Configuration imported successfully!")
+        console.print(f"\n[bold]Import Summary:[/bold]")
+        console.print(f"  Databases: {summary['databases_imported']}")
+        console.print(f"  S3 Buckets: {summary['s3_buckets_imported']}")
+        console.print(f"  Schedules: {summary['schedules_imported']}")
+        
+        if restore_backups:
+            console.print(f"  Backups restored: {summary['backups_restored']}")
+        
+        if summary.get('errors'):
+            console.print(f"\n[yellow]Errors:[/yellow]")
+            for error in summary['errors']:
+                console.print(f"  • {error}")
+    
+    except Exception as e:
+        print_error(f"Import failed: {e}")
 
 def compression_config_menu():
     """Configure compression settings"""

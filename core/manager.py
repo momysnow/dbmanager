@@ -7,12 +7,13 @@ from .providers.base import BaseProvider
 from .providers.postgres import PostgresProvider
 from .providers.mysql import MySQLProvider
 from .providers.sqlserver import SQLServerProvider
+from .providers.sqlite import SQLiteProvider
 from .bucket_manager import BucketManager
 from .backup_utils import save_checksum, verify_backup, verify_checksum
 from .compression import compress_file, get_compression_ratio
 from .encryption import encrypt_file, decrypt_file
 from .notifications import NotificationManager
-# from .providers.sqlite import SQLiteProvider # To be implemented
+# from .providers.mongodb import MongoDBProvider # To be implemented
 
 BACKUP_ROOT = CONFIG_DIR / "backups"
 
@@ -29,18 +30,19 @@ class DBManager:
         # Auto-sync config from S3 on startup if enabled
         self.config_sync.auto_sync_on_startup()
         
-        self.providers: Dict[str, Type[BaseProvider]] = {
+        self.provider_map: Dict[str, Type[BaseProvider]] = {
             "postgres": PostgresProvider,
             "mysql": MySQLProvider,
             "sqlserver": SQLServerProvider,
-            # "sqlite": SQLiteProvider
+            "sqlite": SQLiteProvider,
+            # "mongodb": MongoDBProvider,  # To be implemented
         }
 
     def get_supported_providers(self) -> List[str]:
-        return list(self.providers.keys())
+        return list(self.provider_map.keys())
 
     def add_database(self, name: str, provider_type: str, connection_params: Dict[str, Any]):
-        if provider_type not in self.providers:
+        if provider_type not in self.provider_map:
             raise ValueError(f"Provider {provider_type} not supported.")
         
         db_config = {
