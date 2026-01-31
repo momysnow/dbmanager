@@ -408,20 +408,15 @@ def manage_s3_buckets_menu():
             table.add_column("Provider")
             table.add_column("Bucket")
             table.add_column("Endpoint")
-            table.add_column("Status")
             
             for bucket in buckets:
-                # Test connection
-                status = "✅" if manager.bucket_manager.test_bucket(bucket['id']) else "❌"
                 endpoint = bucket.get('endpoint_url', 'AWS S3')
-                
                 table.add_row(
                     str(bucket['id']),
                     bucket['name'],
                     bucket.get('provider', 's3'),
                     bucket.get('bucket', ''),
-                    endpoint,
-                    status
+                    endpoint
                 )
             
             console.print(table)
@@ -429,37 +424,73 @@ def manage_s3_buckets_menu():
             print_info("No S3 buckets configured")
         
         choices = [
-            Choice(value="add", name="Add S3 Bucket"),
-            Choice(value="test", name="Test Connection"),
-            Choice(value="delete", name="Delete Bucket"),
+            Choice(value="add", name="Add New Bucket"),
+        ]
+        
+        # Add bucket management options if buckets exist
+        if buckets:
+            choices.insert(1, Choice(value="manage", name="Manage Bucket"))
+        
+        choices.extend([
             Separator(),
             Choice(value="back", name="Back to Main Menu"),
-        ]
+        ])
         
         action = get_selection("S3 Buckets Menu", choices)
         
         if action == "add":
             add_s3_bucket_wizard()
-        elif action == "test":
+        elif action == "manage":
             if buckets:
                 bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
-                bucket_id = get_selection("Select bucket to test", bucket_choices)
-                if manager.bucket_manager.test_bucket(bucket_id):
-                    print_success(f"✅ Connection successful!")
-                else:
-                    print_error("❌ Connection failed")
-                input("\nPress Enter to continue...")
+                bucket_id = get_selection("Select bucket to manage", bucket_choices)
+                manage_single_bucket(bucket_id)
+        elif action == "back":
+            break
+
+def manage_single_bucket(bucket_id: int):
+    """Manage a single S3 bucket"""
+    bucket = manager.bucket_manager.get_bucket(bucket_id)
+    if not bucket:
+        print_error("Bucket not found")
+        input("\nPress Enter to continue...")
+        return
+    
+    while True:
+        print_header()
+        console.print(f"\n[bold cyan]═══ Bucket: {bucket['name']} ═══[/bold cyan]\n")
+        
+        # Display bucket details
+        console.print(f"[bold]Provider:[/bold] {bucket.get('provider', 's3')}")
+        console.print(f"[bold]Bucket:[/bold] {bucket.get('bucket', '')}")
+        console.print(f"[bold]Endpoint:[/bold] {bucket.get('endpoint_url', 'AWS S3')}")
+        console.print(f"[bold]Region:[/bold] {bucket.get('region', 'us-east-1')}")
+        console.print()
+        
+        choices = [
+            Choice(value="test", name="Test Connection"),
+            Choice(value="delete", name="Delete Bucket"),
+            Separator(),
+            Choice(value="back", name="Back to Buckets List"),
+        ]
+        
+        action = get_selection("Bucket Actions", choices)
+        
+        if action == "test":
+            console.print("\n[yellow]Testing connection...[/yellow]")
+            if manager.bucket_manager.test_bucket(bucket_id):
+                print_success("✅ Connection successful!")
             else:
-                print_info("No buckets configured")
+                print_error("❌ Connection failed")
+            input("\nPress Enter to continue...")
         elif action == "delete":
-            if buckets:
-                bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
-                bucket_id = get_selection("Select bucket to delete", bucket_choices)
-                if get_confirm(f"Delete bucket configuration?"):
-                    if manager.bucket_manager.delete_bucket(bucket_id):
-                        print_success("Bucket deleted")
-                    else:
-                        print_error("Failed to delete bucket (may be in use)")
+            if get_confirm(f"Delete bucket '{bucket['name']}'?"):
+                if manager.bucket_manager.delete_bucket(bucket_id):
+                    print_success("Bucket deleted")
+                    input("\nPress Enter to continue...")
+                    break
+                else:
+                    print_error("Failed to delete bucket (may be in use)")
                     input("\nPress Enter to continue...")
         elif action == "back":
             break
@@ -469,7 +500,11 @@ def add_s3_bucket_wizard():
     print_header()
     console.print("\n[bold cyan]═══ Add S3 Bucket ═══[/bold cyan]\n")
     
-    name = get_input("Bucket name (display name)", required=True)
+    name = get_input("Bucket name (display name)")
+    if not name:
+        print_info("Cancelled")
+        input("\nPress Enter to continue...")
+        return
     
     provider_choices = [
         Choice(value="minio", name="Minio"),
@@ -479,13 +514,32 @@ def add_s3_bucket_wizard():
     ]
     provider = get_selection("Select provider", provider_choices)
     
-    bucket_name = get_input("S3 Bucket name", required=True)
-    access_key = get_input("Access Key", required=True)
-    secret_key = get_input("Secret Key", required=True, password=True)
+    bucket_name = get_input("S3 Bucket name")
+    if not bucket_name:
+        print_info("Cancelled")
+        input("\nPress Enter to continue...")
+        return
+    
+    access_key = get_input("Access Key")
+    if not access_key:
+        print_info("Cancelled")
+        input("\nPress Enter to continue...")
+        return
+    
+    console.print("[dim]Note: Secret key will not be displayed[/dim]")
+    secret_key = get_input("Secret Key")
+    if not secret_key:
+        print_info("Cancelled")
+        input("\nPress Enter to continue...")
+        return
     
     endpoint_url = None
     if provider != "s3":
-        endpoint_url = get_input(f"{provider.capitalize()} endpoint URL (e.g., http://192.168.1.26:9000)", required=True)
+        endpoint_url = get_input(f"{provider.capitalize()} endpoint URL (e.g., http://192.168.1.26:9000)")
+        if not endpoint_url:
+            print_info("Cancelled")
+            input("\nPress Enter to continue...")
+            return
     
     region = get_input("Region", default="us-east-1")
     
