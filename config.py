@@ -1,20 +1,33 @@
 import json
 import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 # Allow override via env var, default to home dir
 CONFIG_DIR = Path(os.getenv("DBMANAGER_DATA_DIR", Path.home() / ".dbmanager"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
+# Sensitive fields that should be encrypted
+SENSITIVE_FIELDS = [
+    "password", 
+    "smtp_password", 
+    "aws_secret_access_key", 
+    "secret_key", 
+    "webhook_url", # Often contains tokens
+    "connection_string"
+]
+
 class ConfigManager:
     def __init__(self):
         self._ensure_config_exists()
+        # Initialize security manager
+        from core.security import SecurityManager
+        self.security = SecurityManager(CONFIG_DIR / ".secret.key")
         self.config = self._load_config()
 
     def _ensure_config_exists(self):
         if not CONFIG_DIR.exists():
-            CONFIG_DIR.mkdir()
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         if not CONFIG_FILE.exists():
             default_config = {
                 "databases": [],
@@ -58,13 +71,35 @@ class ConfigManager:
             with open(CONFIG_FILE, "w") as f:
                 json.dump(default_config, f, indent=4)
 
+    def _process_config(self, data: Any, encrypt: bool = True) -> Any:
+        """Recursively encrypt or decrypt sensitive fields in config"""
+        if isinstance(data, dict):
+            new_data = {}
+            for k, v in data.items():
+                if k in SENSITIVE_FIELDS and isinstance(v, str) and v:
+                    # Encrypt or decrypt
+                    new_data[k] = self.security.encrypt(v) if encrypt else self.security.decrypt(v)
+                else:
+                    new_data[k] = self._process_config(v, encrypt)
+            return new_data
+        elif isinstance(data, list):
+            return [self._process_config(item, encrypt) for item in data]
+        else:
+            return data
+
     def _load_config(self) -> Dict[str, Any]:
         with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            
+        # Decrypt loaded config so it's usable in memory
+        return self._process_config(data, encrypt=False)
 
     def save_config(self):
+        # Create a deep copy with encrypted values for saving
+        encrypted_config = self._process_config(self.config, encrypt=True)
+        
         with open(CONFIG_FILE, "w") as f:
-            json.dump(self.config, f, indent=4)
+            json.dump(encrypted_config, f, indent=4)
         
         # Auto-sync to S3 if enabled
         self._sync_to_s3()

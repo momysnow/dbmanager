@@ -75,35 +75,46 @@ class SQLServerProvider(BaseProvider):
             # Docker not available or other error
             return False
 
-    def backup(self, backup_dir: str, progress: Optional['BackupProgress'] = None) -> str:
+    def backup(self, backup_dir: str, progress: Optional['BackupProgress'] = None, backup_type: str = "full") -> str:
         """
         Triple-priority backup strategy (ordered by completeness):
         1. mssql-scripter (BEST - complete schema+data, works on x86/AMD64)
         2. Native .bak via Docker API (GOOD - native format, requires local container)
         3. sqlcmd script (FALLBACK - basic but universal)
+        
+        Args:
+            backup_type: 'full' or 'differential' (Only supported by Native .bak method)
         """
         params = self.config["params"]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Priority 1: mssql-scripter (most complete)
-        if self._can_use_mssql_scripter():
+        # Does NOT support differential. Proceed only if backup_type is full.
+        if backup_type == "full" and self._can_use_mssql_scripter():
             try:
                 print("Using mssql-scripter (complete backup with all objects)")
                 return self._backup_mssql_scripter(backup_dir, timestamp)
             except Exception as e:
                 print(f"mssql-scripter failed ({e}), trying Docker API...")
+        elif backup_type != "full":
+            print(f"mssql-scripter skipped (does not support {backup_type})")
         
         # Priority 2: Docker API for native .bak
+        # Supports DIFFERENTIAL
         if self._can_use_docker_api():
             try:
-                print("Using Docker API (native .bak format)")
-                return self._backup_native_bak(backup_dir, timestamp)
+                print(f"Using Docker API (native .bak format, type={backup_type})")
+                return self._backup_native_bak(backup_dir, timestamp, differential=(backup_type == "differential"))
             except Exception as e:
                 print(f"Docker API failed ({e}), using sqlcmd fallback...")
         
         # Priority 3: sqlcmd fallback (basic but works everywhere)
-        print("Using sqlcmd fallback (basic schema+data)")
-        return self._backup_sql_script(backup_dir, timestamp)
+        # Does NOT support differential
+        if backup_type == "full":
+            print("Using sqlcmd fallback (basic schema+data)")
+            return self._backup_sql_script(backup_dir, timestamp)
+        else:
+            raise ValueError("Differential backup is only supported via Native .bak (Docker) method.")
     
     def _backup_mssql_scripter(self, backup_dir: str, timestamp: str) -> str:
         """Complete backup using mssql-scripter (includes all objects)"""
@@ -140,14 +151,15 @@ class SQLServerProvider(BaseProvider):
             error_msg = e.stderr if e.stderr else str(e)
             raise RuntimeError(f"mssql-scripter backup failed: {error_msg}")
 
-    def _backup_native_bak(self, backup_dir: str, timestamp: str) -> str:
+    def _backup_native_bak(self, backup_dir: str, timestamp: str, differential: bool = False) -> str:
         """Native .bak backup using Docker API"""
         import docker
         import tarfile
         import io
         
         params = self.config["params"]
-        filename = f"{self.config['name']}_{timestamp}.bak"
+        suffix = "_diff.bak" if differential else ".bak"
+        filename = f"{self.config['name']}_{timestamp}{suffix}"
         filepath = os.path.join(backup_dir, filename)
         
         Path(backup_dir).mkdir(parents=True, exist_ok=True)
@@ -159,8 +171,13 @@ class SQLServerProvider(BaseProvider):
         # SQL Server internal path for backup
         backup_path_in_container = f"/tmp/{filename}"
         
-        # Execute BACKUP DATABASE command INSIDE the SQL Server container
-        backup_query = f"""BACKUP DATABASE [{params['database']}] TO DISK = N'{backup_path_in_container}' WITH FORMAT, COMPRESSION, STATS = 10;"""
+        # Construct Query
+        type_clause = "WITH DIFFERENTIAL," if differential else "WITH"
+        # Always use FORMAT/COMPRESSION for full. 
+        # For differential, usually just DIFFERENTIAL argument in T-SQL:
+        # BACKUP DATABASE db TO DISK = '...' WITH DIFFERENTIAL
+        
+        backup_query = f"""BACKUP DATABASE [{params['database']}] TO DISK = N'{backup_path_in_container}' {type_clause} COMPRESSION, STATS = 10;"""
         
         # Get trust certificate setting (default: true)
         trust_cert = params.get("trust_certificate", True)

@@ -44,14 +44,15 @@ class S3Storage:
         
         self.client = boto3.client('s3', **client_config)
     
-    def upload_file(self, local_path: str, s3_key: str, metadata: Optional[Dict] = None) -> bool:
+    def upload_file(self, local_path: str, s3_key: str, metadata: Optional[Dict] = None, dedup_ref_key: Optional[str] = None) -> bool:
         """
-        Upload a file to S3
+        Upload a file to S3. Supports deduplication via reference.
         
         Args:
             local_path: Path to local file
             s3_key: S3 object key (path in bucket)
             metadata: Optional metadata to attach to object
+            dedup_ref_key: If provided, creates a lightweight "pointer" object referencing this key instead of uploading data.
         
         Returns:
             True if successful, False otherwise
@@ -60,7 +61,24 @@ class S3Storage:
             extra_args = {}
             if metadata:
                 extra_args['Metadata'] = metadata
+            else:
+                extra_args['Metadata'] = {}
+
+            if dedup_ref_key:
+                # DEDUPLICATION: Create a pointer object
+                print(f"♻️  Deduplication: creating pointer to {dedup_ref_key}")
+                extra_args['Metadata']['dedup_ref'] = dedup_ref_key
+                # We upload an empty body or minimal marker
+                self.client.put_object(
+                    Bucket=self.bucket, 
+                    Key=s3_key, 
+                    Body=b'DEDUP_POINTER', 
+                    Metadata=extra_args['Metadata']
+                )
+                print(f"✅ Uploaded pointer {s3_key} -> {dedup_ref_key}")
+                return True
             
+            # Normal Upload
             self.client.upload_file(local_path, self.bucket, s3_key, ExtraArgs=extra_args)
             print(f"✅ Uploaded {local_path} to s3://{self.bucket}/{s3_key}")
             return True
@@ -76,7 +94,7 @@ class S3Storage:
     
     def download_file(self, s3_key: str, local_path: str) -> bool:
         """
-        Download a file from S3
+        Download a file from S3. Resolves deduplication pointers.
         
         Args:
             s3_key: S3 object key
@@ -89,8 +107,17 @@ class S3Storage:
             # Ensure directory exists
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
             
-            self.client.download_file(self.bucket, s3_key, local_path)
-            print(f"✅ Downloaded s3://{self.bucket}/{s3_key} to {local_path}")
+            # Check for deduplication pointer first (Head Object)
+            head = self.client.head_object(Bucket=self.bucket, Key=s3_key)
+            metadata = head.get('Metadata', {})
+            
+            target_key = s3_key
+            if 'dedup_ref' in metadata:
+                target_key = metadata['dedup_ref']
+                print(f"🔗 Resolving deduplication pointer: {s3_key} -> {target_key}")
+            
+            self.client.download_file(self.bucket, target_key, local_path)
+            print(f"✅ Downloaded s3://{self.bucket}/{target_key} to {local_path}")
             return True
         except ClientError as e:
             if e.response['Error']['Code'] == '404':

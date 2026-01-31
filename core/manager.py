@@ -165,7 +165,7 @@ class DBManager:
         safe_name = "".join([c for c in db_config["name"] if c.isalnum() or c in ('-', '_')])
         return BACKUP_ROOT / f"{db_id}_{safe_name}"
 
-    def backup_database(self, db_id: int, progress: Optional['BackupProgress'] = None) -> str:
+    def backup_database(self, db_id: int, tag: str = None, progress: Optional['BackupProgress'] = None) -> str:
         db_config = self.config_manager.get_database(db_id)
         provider = self.get_provider_instance(db_id)
         backup_dir = self._get_backup_dir(db_id)
@@ -179,6 +179,29 @@ class DBManager:
         # Run local backup with progress tracking
         path = provider.backup(str(backup_dir), progress=progress)
         
+        # Apply Tag if requested (Rename file)
+        if tag:
+            try:
+                directory = os.path.dirname(path)
+                filename = os.path.basename(path)
+                # Inject tag before extension
+                name_part, ext = os.path.splitext(filename)
+                # Handle .dump.gz or similar if provider adds it, closely looking at extension
+                if filename.endswith('.tar.gz'):
+                    name_part = filename[:-7]
+                    ext = '.tar.gz'
+                elif filename.endswith('.gz'):
+                    name_part, ext = os.path.splitext(filename[:-3])
+                    ext = ext + '.gz'
+                
+                new_filename = f"{name_part}_{tag}{ext}"
+                new_path = os.path.join(directory, new_filename)
+                os.rename(path, new_path)
+                path = new_path
+                print(f"🏷️  Tagged backup: {new_filename}")
+            except Exception as e:
+                print(f"⚠️  Failed to tag backup: {e}")
+
         # Generate checksum for backup integrity
         try:
             checksum_file = save_checksum(path)
@@ -258,18 +281,62 @@ class DBManager:
                     filename = os.path.basename(path)
                     s3_key = f"backups/{db_id}/{filename}"
                     
+                    # Calculate or retrieve checksum (hash)
+                    current_hash = None
+                    if checksum_file:
+                         # Read checksum from file
+                         try:
+                             with open(checksum_file, 'r') as f:
+                                 current_hash = f.read().strip()
+                         except:
+                             pass
+                    
+                    # Check for Deduplication
+                    dedup_ref_key = None
+                    if current_hash:
+                        # Fetch latest backup from S3
+                        try:
+                            prefix = f"backups/{db_id}/"
+                            # List 5 latest to be safe
+                            existing_backups = storage.list_files(prefix, max_keys=5)
+                            # Sort by date desc (list_files might not guarantee order)
+                            existing_backups.sort(key=lambda x: x['last_modified'], reverse=True)
+                            
+                            if existing_backups:
+                                latest = existing_backups[0]
+                                # Get full info to access Metadata
+                                info = storage.get_file_info(latest['key'])
+                                if info and 'metadata' in info:
+                                    last_hash = info['metadata'].get('hash')
+                                    if last_hash == current_hash:
+                                        # Identical content! Use pointer
+                                        # But wait, if the latest is ITSELF a pointer, we should point to ITS target
+                                        # to avoid long chains? Or just point to it. 
+                                        # Pointer resolution is recursive-ish in logic, but single-hop is safer.
+                                        # Let's check if 'dedup_ref' is in its metadata
+                                        if 'dedup_ref' in info['metadata']:
+                                            dedup_ref_key = info['metadata']['dedup_ref']
+                                        else:
+                                            dedup_ref_key = latest['key']
+                        except Exception as e:
+                            print(f"⚠️  Deduplication check failed: {e}")
+
                     # Add metadata
                     metadata = {
                         'database_id': str(db_id),
                         'database_name': db_config.get('name', ''),
                         'provider': db_config.get('provider', ''),
-                        'backup_date': datetime.now().isoformat()
+                        'backup_date': datetime.now().isoformat(),
+                        'tag': tag if tag else '',
+                        'hash': current_hash if current_hash else ''
                     }
                     
-                    if storage.upload_file(path, s3_key, metadata):
+                    if storage.upload_file(path, s3_key, metadata, dedup_ref_key=dedup_ref_key):
                         print(f"✅ Backup uploaded to S3: {s3_key}")
                         
-                        # Upload checksum file if it exists
+                        # Upload checksum file if it exists AND we didn't deduplicate (or should we always?)
+                        # If we deduplicated, the data is safe. The checksum file is tiny, let's just upload it normally
+                        # so verification tools work locally if downloaded.
                         if checksum_file and Path(checksum_file).exists():
                             checksum_s3_key = f"{s3_key}.sha256"
                             if storage.upload_file(checksum_file, checksum_s3_key):
@@ -339,7 +406,7 @@ class DBManager:
         
         backups = []
         # Support multiple backup formats: .sql, .dump (PostgreSQL), .bak (SQL Server)
-        for pattern in ["*.sql", "*.dump", "*.bak"]:
+        for pattern in ["*.sql", "*.dump", "*.bak", "*.tar.gz", "*.gz"]:
             for f in backup_dir.glob(pattern):
                 stat = f.stat()
                 backups.append({
@@ -364,7 +431,7 @@ class DBManager:
         """
         return verify_backup(backup_path)
     
-    def restore_database(self, db_id: int, backup_file: str, progress: Optional['BackupProgress'] = None):
+    def restore_database(self, db_id: int, backup_file: str, progress: Optional['BackupProgress'] = None, create_safety_snapshot: bool = True):
         provider = self.get_provider_instance(db_id)
         # Verify file exists
         if not Path(backup_file).exists():
@@ -374,6 +441,7 @@ class DBManager:
         checksum_file = Path(f"{backup_file}.sha256")
         if checksum_file.exists():
             print(f"🔍 Verifying backup integrity...")
+            if progress: progress.update(message="Verifying backup integrity...", step="Pre-check")
             try:
                 if verify_checksum(backup_file):
                     print(f"✅ Checksum verified - backup is intact")
@@ -381,8 +449,106 @@ class DBManager:
                     raise ValueError("Checksum verification failed - backup may be corrupted")
             except Exception as e:
                 print(f"⚠️  Checksum verification failed: {e}")
-                response = input("Continue with restore anyway? (y/n): ").lower().strip()
-                if response != 'y':
-                    raise RuntimeError("Restore cancelled due to checksum mismatch")
+                # For critical integrity check, we normally generally abort, 
+                # but might allow user override if CLI. For API/Auto, we should abort or warn.
+                # Assuming strict mode for Safety.
+                raise RuntimeError(f"Restore aborted: Checksum verification failed ({e})")
         
-        return provider.restore(backup_file, progress=progress)
+        # SAFETY SNAPSHOT
+        safety_snapshot_path = None
+        if create_safety_snapshot:
+            print(f"📸 Creating safety snapshot before restore...")
+            if progress: progress.update(message="Creating safety snapshot...", step="Safety Snapshot")
+            try:
+                # We use a special tag and don't track progress for this internal step to avoid confusing the main progress bar
+                safety_snapshot_path = self.backup_database(db_id, tag="safety_snapshot")
+                print(f"✅ Safety snapshot created: {os.path.basename(safety_snapshot_path)}")
+            except Exception as e:
+                print(f"⚠️  Failed to create safety snapshot: {e}")
+                # We should probably abort restore if safety snapshot fails, to be safe.
+                raise RuntimeError(f"Restore aborted: Could not create safety snapshot ({e})")
+
+        # PERFORM RESTORE
+        try:
+            result = provider.restore(backup_file, progress=progress)
+            
+            # If we got here, success. We can optionally clean up safety snapshot or keep it.
+            # Keeping it is safer (can be deleted by retention later).
+            return result
+
+        except Exception as e:
+            print(f"❌ RESTORE FAILED: {e}")
+            if progress: progress.fail(f"Restore failed: {e}")
+            
+            # ROLLBACK LOGIC
+            if safety_snapshot_path and os.path.exists(safety_snapshot_path):
+                print(f"🔄 Attempting ROLLBACK to safety snapshot...")
+                if progress: 
+                    progress.update(message="Restoring from safety snapshot...", step="Rolling Back")
+                    # Reset progress for rollback? Or just update message.
+                
+                try:
+                    # Recursive call with create_safety_snapshot=False to avoid infinite loop
+                    self.restore_database(db_id, safety_snapshot_path, create_safety_snapshot=False)
+                    msg = "Restore failed, but database was successfully rolled back to previous state."
+                    print(f"✅ {msg}")
+                    # Re-raise original error but with rollback info
+                    raise RuntimeError(f"Restore failed: {e}. ROLLBACK SUCCESSFUL.")
+                except Exception as rollback_error:
+                    msg = f"CRITICAL: Restore failed AND Rollback failed! Database may be in inconsistent state. ({rollback_error})"
+                    print(f"⛔️ {msg}")
+                    raise RuntimeError(msg)
+            else:
+                raise RuntimeError(f"Restore failed: {e}. No safety snapshot available for rollback.")
+
+    def backup_all_databases(self, max_workers: int = 2) -> Dict[str, Any]:
+        """
+        Backup all configured databases, potentially in parallel.
+        
+        Args:
+            max_workers: Number of concurrent backup jobs. Default 2.
+            
+        Returns:
+            Dictionary with results: {'success': [], 'failed': []}
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        databases = self.list_databases()
+        if not databases:
+            print("No databases configured.")
+            return {'success': [], 'failed': []}
+        
+        print(f"🚀 Starting backup for {len(databases)} databases (Parallel: {max_workers})...")
+        
+        results = {'success': [], 'failed': []}
+        
+        # Helper function for thread
+        def _job(db_config):
+            db_id = db_config['id']
+            name = db_config['name']
+            try:
+                # We don't pass progress tracker for batch jobs mostly to avoid stdout collision,
+                # unless we have a sophisticated multi-bar UI.
+                path = self.backup_database(db_id)
+                return {'id': db_id, 'name': name, 'status': 'success', 'path': path}
+            except Exception as e:
+                return {'id': db_id, 'name': name, 'status': 'error', 'error': str(e)}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_db = {executor.submit(_job, db): db for db in databases}
+            
+            for future in as_completed(future_to_db):
+                db = future_to_db[future]
+                try:
+                    res = future.result()
+                    if res['status'] == 'success':
+                        print(f"✅ [{res['name']}] Backup completed.")
+                        results['success'].append(res)
+                    else:
+                        print(f"❌ [{res['name']}] Backup failed: {res['error']}")
+                        results['failed'].append(res)
+                except Exception as exc:
+                    print(f"❌ [{db['name']}] Thread exception: {exc}")
+                    results['failed'].append({'id': db['id'], 'name': db['name'], 'error': str(exc)})
+                    
+        return results
