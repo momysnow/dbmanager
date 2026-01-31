@@ -16,6 +16,14 @@ class DBManager:
     def __init__(self):
         self.config_manager = ConfigManager()
         self.bucket_manager = BucketManager(self.config_manager)
+        
+        # Initialize config sync
+        from .config_sync import ConfigSync
+        self.config_sync = ConfigSync(self.bucket_manager, self.config_manager)
+        
+        # Auto-sync config from S3 on startup if enabled
+        self.config_sync.auto_sync_on_startup()
+        
         self.providers: Dict[str, Type[BaseProvider]] = {
             "postgres": PostgresProvider,
             "mysql": MySQLProvider,

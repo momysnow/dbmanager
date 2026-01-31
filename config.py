@@ -31,6 +31,26 @@ class ConfigManager:
     def save_config(self):
         with open(CONFIG_FILE, "w") as f:
             json.dump(self.config, f, indent=4)
+        
+        # Auto-sync to S3 if enabled
+        self._sync_to_s3()
+    
+    def _sync_to_s3(self):
+        """Sync config to S3 if configured"""
+        try:
+            # Avoid circular import
+            from core.config_sync import ConfigSync
+            from core.bucket_manager import BucketManager
+            
+            # Only sync if bucket is configured
+            bucket_id = self.config.get('config_sync_bucket_id')
+            if bucket_id:
+                bucket_manager = BucketManager(self)
+                config_sync = ConfigSync(bucket_manager, self)
+                config_sync.sync_to_s3(silent=True)
+        except Exception:
+            # Silently fail to avoid breaking config saves
+            pass
 
     def add_database(self, db_config: Dict[str, Any]):
         # Generate a simple ID if not present
