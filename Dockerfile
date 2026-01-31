@@ -43,7 +43,7 @@ WORKDIR /app
 
 # Copy requirements and install
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout=300 -r requirements.txt
 
 # Copy source code
 COPY . .
