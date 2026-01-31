@@ -121,7 +121,10 @@ def interactive():
         
         action = get_selection("Main Menu", choices)
         
-        if action == "manage":
+        if action == "dashboard":
+            from cli.dashboard import dashboard_menu
+            dashboard_menu()
+        elif action == "manage":
             manage_databases_menu()
         elif action == "add":
             add_database_wizard()
