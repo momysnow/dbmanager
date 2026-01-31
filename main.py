@@ -35,6 +35,8 @@ def interactive():
             Choice(value="manage", name="Manage Databases"),
             Choice(value="add", name="Add Database"),
             Choice(value="schedule", name="Schedule Backups"),
+            Choice(value="s3", name="Manage S3 Buckets"),
+            Choice(value="settings", name="Settings"),
             Separator(),
             Choice(value="exit", name="Exit"),
         ]
@@ -47,6 +49,10 @@ def interactive():
             add_database_wizard()
         elif action == "schedule":
             schedule_menu() # Changed from wizard to menu to allow listing
+        elif action == "s3":
+            manage_s3_buckets_menu()
+        elif action == "settings":
+            settings_menu()
         elif action == "exit":
             console.print("Goodbye!")
             break
@@ -193,9 +199,35 @@ def add_database_wizard():
     if provider == "sqlserver":
         trust_cert = get_confirm("Trust SSL Certificate?", default=True)
         params["trust_certificate"] = trust_cert
+    
+    # S3 Backup Options
+    console.print("\n[bold cyan]S3 Backup Configuration[/bold cyan]")
+    s3_enabled = get_confirm("Enable S3 backups?", default=False)
+    s3_bucket_id = None
+    s3_retention = 0
+    
+    if s3_enabled:
+        buckets = manager.bucket_manager.list_buckets()
+        if buckets:
+            bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
+            s3_bucket_id = get_selection("Select S3 bucket", bucket_choices)
+            s3_retention_str = get_input("S3 Retention (keep last N backups on S3, 0=infinite):", default="0")
+            s3_retention = int(s3_retention_str) if s3_retention_str else 0
+        else:
+            print_info("No S3 buckets configured. Add one in 'Manage S3 Buckets'.")
+            s3_enabled = False
 
     try:
-        manager.add_database(name, provider, params)
+        db_id = manager.add_database(name, provider, params)
+        
+        # Update with S3 settings
+        if s3_enabled:
+            db_config = manager.config_manager.get_database(db_id)
+            db_config['s3_enabled'] = s3_enabled
+            db_config['s3_bucket_id'] = s3_bucket_id
+            db_config['s3_retention'] = s3_retention
+            manager.config_manager.save_config()
+        
         print_success("Database added!")
         get_input("Press Enter...")
     except Exception as e:
@@ -250,9 +282,34 @@ def edit_database_wizard(db_id: int):
         current_trust = params.get("trust_certificate", True)
         trust_cert = get_confirm("Trust SSL Certificate?", default=current_trust)
         new_params["trust_certificate"] = trust_cert
+    
+    # S3 Backup Options
+    console.print("\n[bold cyan]S3 Backup Configuration[/bold cyan]")
+    current_s3_enabled = db.get('s3_enabled', False)
+    s3_enabled = get_confirm("Enable S3 backups?", default=current_s3_enabled)
+    s3_bucket_id = None
+    s3_retention = 0
+    
+    if s3_enabled:
+        buckets = manager.bucket_manager.list_buckets()
+        if buckets:
+            bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
+            current_bucket_id = db.get('s3_bucket_id')
+            
+            # Set default to current bucket if exists
+            default_bucket = current_bucket_id if current_bucket_id in [b['id'] for b in buckets] else None
+            s3_bucket_id = get_selection("Select S3 bucket", bucket_choices, default=default_bucket)
+            
+            current_s3_retention = db.get('s3_retention', 0)
+            s3_retention_str = get_input("S3 Retention (keep last N backups on S3, 0=infinite):", default=str(current_s3_retention))
+            s3_retention = int(s3_retention_str) if s3_retention_str else 0
+        else:
+            print_info("No S3 buckets configured. Add one in 'Manage S3 Buckets'.")
+            s3_enabled = False
 
     try:
-        if manager.update_database(db_id, name, provider, new_params, int(retention)):
+        if manager.update_database(db_id, name, provider, new_params, int(retention),
+                                  s3_enabled, s3_bucket_id, s3_retention):
             print_success("Database configuration updated!")
         else:
             print_error("Failed to update.")
@@ -333,6 +390,198 @@ def schedule_wizard():
     except Exception as e:
         print_error(f"Error: {e}")
         get_input("Press Enter...")
+
+
+def manage_s3_buckets_menu():
+    """Menu for managing S3 bucket configurations"""
+    while True:
+        print_header()
+        console.print("\n[bold cyan]═══ S3 Buckets ═══[/bold cyan]\n")
+        
+        # List current buckets
+        buckets = manager.bucket_manager.list_buckets()
+        
+        if buckets:
+            table = Table(show_header=True, header_style="bold magenta")
+            table.add_column("ID", style="dim")
+            table.add_column("Name")
+            table.add_column("Provider")
+            table.add_column("Bucket")
+            table.add_column("Endpoint")
+            table.add_column("Status")
+            
+            for bucket in buckets:
+                # Test connection
+                status = "✅" if manager.bucket_manager.test_bucket(bucket['id']) else "❌"
+                endpoint = bucket.get('endpoint_url', 'AWS S3')
+                
+                table.add_row(
+                    str(bucket['id']),
+                    bucket['name'],
+                    bucket.get('provider', 's3'),
+                    bucket.get('bucket', ''),
+                    endpoint,
+                    status
+                )
+            
+            console.print(table)
+        else:
+            print_info("No S3 buckets configured")
+        
+        choices = [
+            Choice(value="add", name="Add S3 Bucket"),
+            Choice(value="test", name="Test Connection"),
+            Choice(value="delete", name="Delete Bucket"),
+            Separator(),
+            Choice(value="back", name="Back to Main Menu"),
+        ]
+        
+        action = get_selection("S3 Buckets Menu", choices)
+        
+        if action == "add":
+            add_s3_bucket_wizard()
+        elif action == "test":
+            if buckets:
+                bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
+                bucket_id = get_selection("Select bucket to test", bucket_choices)
+                if manager.bucket_manager.test_bucket(bucket_id):
+                    print_success(f"✅ Connection successful!")
+                else:
+                    print_error("❌ Connection failed")
+                input("\nPress Enter to continue...")
+            else:
+                print_info("No buckets configured")
+        elif action == "delete":
+            if buckets:
+                bucket_choices = [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
+                bucket_id = get_selection("Select bucket to delete", bucket_choices)
+                if get_confirm(f"Delete bucket configuration?"):
+                    if manager.bucket_manager.delete_bucket(bucket_id):
+                        print_success("Bucket deleted")
+                    else:
+                        print_error("Failed to delete bucket (may be in use)")
+                    input("\nPress Enter to continue...")
+        elif action == "back":
+            break
+
+def add_s3_bucket_wizard():
+    """Wizard for adding S3 bucket configuration"""
+    print_header()
+    console.print("\n[bold cyan]═══ Add S3 Bucket ═══[/bold cyan]\n")
+    
+    name = get_input("Bucket name (display name)", required=True)
+    
+    provider_choices = [
+        Choice(value="minio", name="Minio"),
+        Choice(value="garage", name="Garage"),
+        Choice(value="s3", name="Amazon S3"),
+        Choice(value="other", name="Other S3-compatible"),
+    ]
+    provider = get_selection("Select provider", provider_choices)
+    
+    bucket_name = get_input("S3 Bucket name", required=True)
+    access_key = get_input("Access Key", required=True)
+    secret_key = get_input("Secret Key", required=True, password=True)
+    
+    endpoint_url = None
+    if provider != "s3":
+        endpoint_url = get_input(f"{provider.capitalize()} endpoint URL (e.g., http://192.168.1.26:9000)", required=True)
+    
+    region = get_input("Region", default="us-east-1")
+    
+    bucket_config = {
+        'name': name,
+        'provider': provider,
+        'bucket': bucket_name,
+        'access_key': access_key,
+        'secret_key': secret_key,
+        'region': region
+    }
+    
+    if endpoint_url:
+        bucket_config['endpoint_url'] = endpoint_url
+    
+    # Test connection before saving
+    console.print("\n[yellow]Testing connection...[/yellow]")
+    from core.s3_storage import S3Storage
+    try:
+        test_storage = S3Storage(bucket_config)
+        if test_storage.test_connection():
+            print_success("✅ Connection successful!")
+            bucket_id = manager.bucket_manager.add_bucket(bucket_config)
+            print_success(f"S3 bucket added with ID {bucket_id}")
+        else:
+            print_error("❌ Connection test failed. Bucket not saved.")
+    except Exception as e:
+        print_error(f"❌ Connection test failed: {e}")
+    
+    input("\nPress Enter to continue...")
+
+def settings_menu():
+    """Settings menu for config sync and other options"""
+    while True:
+        print_header()
+        console.print("\n[bold cyan]═══ Settings ═══[/bold cyan]\n")
+        
+        # Show current config sync status
+        current_bucket_id = manager.config_sync.get_config_bucket_id()
+        if current_bucket_id:
+            bucket_name = manager.bucket_manager.get_bucket_name(current_bucket_id)
+            console.print(f"Config Sync: [green]Enabled[/green] → {bucket_name}")
+        else:
+            console.print(f"Config Sync: [dim]Disabled[/dim]")
+        
+        choices = [
+            Choice(value="config_sync", name="Configure Config Sync"),
+            Choice(value="sync_now", name="Sync Config to S3 Now"),
+            Choice(value="download", name="Download Config from S3"),
+            Separator(),
+            Choice(value="back", name="Back to Main Menu"),
+        ]
+        
+        action = get_selection("Settings Menu", choices)
+        
+        if action == "config_sync":
+            buckets = manager.bucket_manager.list_buckets()
+            if not buckets:
+                print_info("No S3 buckets configured. Add one first in 'Manage S3 Buckets'.")
+                input("\nPress Enter to continue...")
+                continue
+            
+            bucket_choices = [
+                Choice(value=None, name="Disable config sync"),
+                Separator(),
+            ] + [Choice(value=b['id'], name=f"{b['name']} ({b.get('bucket', '')})") for b in buckets]
+            
+            bucket_id = get_selection("Select bucket for config sync", bucket_choices)
+            manager.config_sync.set_config_bucket(bucket_id)
+            
+            if bucket_id:
+                print_success(f"Config sync enabled")
+                # Initial sync
+                if get_confirm("Upload config to S3 now?"):
+                    manager.config_sync.sync_to_s3()
+            else:
+                print_success("Config sync disabled")
+            
+            input("\nPress Enter to continue...")
+            
+        elif action == "sync_now":
+            if current_bucket_id:
+                manager.config_sync.sync_to_s3()
+            else:
+                print_info("Config sync not configured")
+            input("\nPress Enter to continue...")
+            
+        elif action == "download":
+            if current_bucket_id:
+                manager.config_sync.sync_from_s3()
+            else:
+                print_info("Config sync not configured")
+            input("\nPress Enter to continue...")
+            
+        elif action == "back":
+            break
 
 if __name__ == "__main__":
     app()
