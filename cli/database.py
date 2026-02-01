@@ -11,6 +11,31 @@ from utils.ui import (
     print_info, get_confirm, get_selection
 )
 
+MB_DIVISOR = 1024 * 1024
+
+
+def _format_mb(size_bytes: float) -> str:
+    return f"{size_bytes / MB_DIVISOR:.2f}"
+
+
+def _s3_backup_prefix(db_id: int) -> str:
+    return f"backups/{db_id}/"
+
+
+def _get_s3_storage(db_id: int):
+    db = manager.config_manager.get_database(db_id)
+    bucket_id = db.get('s3_bucket_id') if db else None
+    if not bucket_id:
+        print_error("No S3 bucket configured")
+        return None, None
+
+    storage = manager.bucket_manager.get_storage(bucket_id)
+    if not storage:
+        print_error("Failed to connect to S3")
+        return db, None
+
+    return db, storage
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATABASE LIST & MENU
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -37,11 +62,12 @@ def manage_databases_menu():
         
         for db in dbs:
             s3_status = "✅" if db.get('s3_enabled') else "❌"
+            host_or_uri = db["params"].get("host") or db["params"].get("uri", "-")
             table.add_row(
                 str(db["id"]),
                 db["name"],
                 db["provider"],
-                db["params"].get("host", "-"),
+                host_or_uri,
                 str(db.get("retention", "∞")),
                 s3_status
             )
@@ -229,20 +255,12 @@ def view_s3_backups(db_id: int):
     """View S3 backups for a database"""
     console.print("\n[bold cyan]═══ S3 Backups ═══[/bold cyan]\n")
     
-    db = manager.config_manager.get_database(db_id)
-    bucket_id = db.get('s3_bucket_id')
-    
-    if not bucket_id:
-        print_error("No S3 bucket configured")
+    db, storage = _get_s3_storage(db_id)
+    if not db or not storage:
         return
     
     try:
-        storage = manager.bucket_manager.get_storage(bucket_id)
-        if not storage:
-            print_error("Failed to connect to S3")
-            return
-        
-        prefix = f"backups/{db_id}/"
+        prefix = _s3_backup_prefix(db_id)
         s3_backups = storage.list_files(prefix)
         
         if not s3_backups:
@@ -263,7 +281,7 @@ def view_s3_backups(db_id: int):
                 str(i),
                 filename,
                 str(backup['last_modified']),
-                f"{backup['size'] / (1024 * 1024):.2f}"
+                _format_mb(backup['size'])
             )
         
         console.print(table)
@@ -373,22 +391,13 @@ def restore_from_s3_wizard(db_id: int):
     print_header()
     console.print("\n[bold cyan]═══ Restore from S3 ═══[/bold cyan]\n")
     
-    db = manager.config_manager.get_database(db_id)
-    bucket_id = db.get('s3_bucket_id')
-    
-    if not bucket_id:
-        print_error("No S3 bucket configured")
+    db, storage = _get_s3_storage(db_id)
+    if not db or not storage:
         get_input("Press Enter to continue...")
         return
     
     try:
-        storage = manager.bucket_manager.get_storage(bucket_id)
-        if not storage:
-            print_error("Failed to connect to S3")
-            get_input("Press Enter to continue...")
-            return
-        
-        prefix = f"backups/{db_id}/"
+        prefix = _s3_backup_prefix(db_id)
         s3_backups = storage.list_files(prefix)
         
         if not s3_backups:
@@ -402,7 +411,7 @@ def restore_from_s3_wizard(db_id: int):
         for backup in s3_backups:
             filename = backup['key'].split('/')[-1]
             date_str = str(backup['last_modified'])[:19]
-            size_mb = backup['size'] / (1024 * 1024)
+            size_mb = backup['size'] / MB_DIVISOR
             backup_choices.append(
                 Choice(value=backup['key'], name=f"{filename} - {date_str} ({size_mb:.2f} MB)")
             )
@@ -417,27 +426,20 @@ def restore_from_s3_wizard(db_id: int):
         
         # Download to temp location
         console.print(f"\n[yellow]Downloading from S3...[/yellow]")
-        temp_dir = tempfile.mkdtemp()
-        local_path = os.path.join(temp_dir, selected_key.split('/')[-1])
-        
-        if storage.download_file(selected_key, local_path):
-            console.print(f"[green]✅ Downloaded[/green]")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_path = os.path.join(temp_dir, selected_key.split('/')[-1])
             
-            if get_confirm(f"⚠️  This will REPLACE the current database. Continue?"):
-                try:
-                    manager.restore_database(db_id, local_path)
-                    print_success("Database restored from S3!")
-                except Exception as e:
-                    print_error(f"Restore failed: {e}")
-            
-            # Cleanup
-            try:
-                os.remove(local_path)
-                os.rmdir(temp_dir)
-            except:
-                pass
-        else:
-            print_error("Failed to download from S3")
+            if storage.download_file(selected_key, local_path):
+                console.print(f"[green]✅ Downloaded[/green]")
+                
+                if get_confirm(f"⚠️  This will REPLACE the current database. Continue?"):
+                    try:
+                        manager.restore_database(db_id, local_path)
+                        print_success("Database restored from S3!")
+                    except Exception as e:
+                        print_error(f"Restore failed: {e}")
+            else:
+                print_error("Failed to download from S3")
         
     except Exception as e:
         print_error(f"Restore from S3 failed: {e}")
@@ -456,27 +458,18 @@ def sync_backups_wizard(db_id: int):
     print_header()
     console.print("\n[bold cyan]═══ Sync Backups ═══[/bold cyan]\n")
     
-    db = manager.config_manager.get_database(db_id)
-    bucket_id = db.get('s3_bucket_id')
-    
-    if not bucket_id:
-        print_error("No S3 bucket configured")
+    db, storage = _get_s3_storage(db_id)
+    if not db or not storage:
         get_input("Press Enter to continue...")
         return
     
     try:
-        storage = manager.bucket_manager.get_storage(bucket_id)
-        if not storage:
-            print_error("Failed to connect to S3")
-            get_input("Press Enter to continue...")
-            return
-        
         # Get local backups
         local_backups = manager.list_backups(db_id)
         local_files = {b['filename'] for b in local_backups}
         
         # Get S3 backups
-        prefix = f"backups/{db_id}/"
+        prefix = _s3_backup_prefix(db_id)
         s3_backups = storage.list_files(prefix)
         s3_files = {b['key'].split('/')[-1] for b in s3_backups}
         
@@ -558,29 +551,47 @@ def add_database_wizard():
     providers = manager.get_supported_providers()
     provider = get_selection("Select Provider", [Choice(p, p) for p in providers])
     
-    host = get_input("Host:", "localhost")
-    
-    default_port = "5432"
-    if provider == "mysql": default_port = "3306"
-    elif provider == "sqlserver": default_port = "1433"
-    
-    port = get_input("Port:", default_port)
-    user = get_input("Username:")
-    password = get_input("Password (leave empty if none):")
-    database = get_input("Database Name:")
+    params = {}
 
-    params = {
-        "host": host,
-        "port": port,
-        "user": user,
-        "password": password,
-        "database": database
-    }
-    
-    # SQL Server specific options
-    if provider == "sqlserver":
-        trust_cert = get_confirm("Trust SSL Certificate?", default=True)
-        params["trust_certificate"] = trust_cert
+    use_mongo_uri = False
+    if provider == "mongodb":
+        use_mongo_uri = get_confirm("Use MongoDB connection URI?", default=False)
+
+    if provider == "mongodb" and use_mongo_uri:
+        uri = get_input("MongoDB URI (mongodb://...):")
+        if not uri:
+            print_info("MongoDB URI is required.")
+            get_input("Press Enter...")
+            return
+        params["uri"] = uri
+    else:
+        host = get_input("Host:", "localhost")
+        
+        default_port = "5432"
+        if provider == "mysql":
+            default_port = "3306"
+        elif provider == "sqlserver":
+            default_port = "1433"
+        elif provider == "mongodb":
+            default_port = "27017"
+        
+        port = get_input("Port:", default_port)
+        user = get_input("Username:")
+        password = get_input("Password (leave empty if none):")
+        database = get_input("Database Name:")
+
+        params = {
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": password,
+            "database": database
+        }
+        
+        # SQL Server specific options
+        if provider == "sqlserver":
+            trust_cert = get_confirm("Trust SSL Certificate?", default=True)
+            params["trust_certificate"] = trust_cert
     
     retention = get_input("Local Retention (keep last N backups, 0=infinite):", default="0")
     
@@ -638,30 +649,44 @@ def edit_database_wizard(db_id: int):
     provider = get_selection("Select Provider", [Choice(p, p) for p in providers], default=current_provider)
     
     params = db['params']
-    host = get_input("Host:", default=params.get('host', 'localhost'))
-    port = get_input("Port:", default=str(params.get('port', '')))
-    user = get_input("Username:", default=params.get('user', ''))
-    
-    print_info("(Leave password empty to keep existing)")
-    new_password = get_input("Password:")
-    password = new_password if new_password else params.get('password', '')
-
-    database = get_input("Database Name:", default=params.get('database', ''))
     retention = get_input("Local Retention (keep last N backups, 0=infinite):", default=str(db.get("retention", 0)))
 
-    new_params = {
-        "host": host,
-        "port": port,
-        "user": user,
-        "password": password,
-        "database": database
-    }
-    
-    # SQL Server specific options
-    if provider == "sqlserver":
-        current_trust = params.get("trust_certificate", True)
-        trust_cert = get_confirm("Trust SSL Certificate?", default=current_trust)
-        new_params["trust_certificate"] = trust_cert
+    new_params = {}
+    use_mongo_uri = False
+    if provider == "mongodb":
+        use_mongo_uri = get_confirm("Use MongoDB connection URI?", default=bool(params.get("uri")))
+
+    if provider == "mongodb" and use_mongo_uri:
+        uri = get_input("MongoDB URI (mongodb://...):", default=params.get("uri", ""))
+        if not uri:
+            print_error("MongoDB URI is required.")
+            get_input("Press Enter...")
+            return
+        new_params["uri"] = uri
+    else:
+        host = get_input("Host:", default=params.get('host', 'localhost'))
+        port = get_input("Port:", default=str(params.get('port', '')))
+        user = get_input("Username:", default=params.get('user', ''))
+        
+        print_info("(Leave password empty to keep existing)")
+        new_password = get_input("Password:")
+        password = new_password if new_password else params.get('password', '')
+
+        database = get_input("Database Name:", default=params.get('database', ''))
+
+        new_params = {
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": password,
+            "database": database
+        }
+        
+        # SQL Server specific options
+        if provider == "sqlserver":
+            current_trust = params.get("trust_certificate", True)
+            trust_cert = get_confirm("Trust SSL Certificate?", default=current_trust)
+            new_params["trust_certificate"] = trust_cert
     
     # S3 Backup Options
     console.print("\n[bold cyan]S3 Backup Configuration[/bold cyan]")
