@@ -1,8 +1,9 @@
 """Backup and restore endpoints"""
 
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
-from typing import List
+from typing import List, Optional
 import os
+import tempfile
 from pathlib import Path
 
 from api.models.backup import (
@@ -10,7 +11,9 @@ from api.models.backup import (
     RestoreRequest,
     TaskResponse,
     TaskStatus,
-    BackupInfo
+    BackupInfo,
+    BackupSyncRequest,
+    BackupSyncResult
 )
 from api.dependencies import get_config_manager, get_db_manager
 from api.task_manager import task_manager
@@ -19,6 +22,33 @@ from core.manager import DBManager
 from core.progress import BackupProgress
 
 router = APIRouter()
+
+
+def _get_db_or_404(database_id: int, config_manager: ConfigManager) -> dict:
+    db = config_manager.get_database(database_id)
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Database with ID {database_id} not found"
+        )
+    return db
+
+
+def _get_s3_storage(database_id: int, config_manager: ConfigManager, db_manager: DBManager):
+    db = _get_db_or_404(database_id, config_manager)
+    if not db.get("s3_enabled") or not db.get("s3_bucket_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="S3 not configured for this database"
+        )
+
+    storage = db_manager.bucket_manager.get_storage(db.get("s3_bucket_id"))
+    if not storage:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bucket storage not found"
+        )
+    return db, storage
 
 
 def run_backup_task(task_id: str, db_id: int, db_manager: DBManager):
@@ -73,6 +103,39 @@ def run_restore_task(task_id: str, db_id: int, backup_file: str, db_manager: DBM
         task_manager.fail_task(task_id, str(e))
 
 
+def run_restore_from_s3_task(
+    task_id: str,
+    db_id: int,
+    s3_key: str,
+    db_manager: DBManager,
+    config_manager: ConfigManager
+):
+    """Background task to restore from S3 backup"""
+    temp_dir = None
+    try:
+        task_manager.update_task(task_id, status="running", message="Downloading backup from S3...")
+
+        _, storage = _get_s3_storage(db_id, config_manager, db_manager)
+        temp_dir = tempfile.mkdtemp()
+        local_path = os.path.join(temp_dir, os.path.basename(s3_key))
+
+        if not storage.download_file(s3_key, local_path):
+            raise RuntimeError("Failed to download backup from S3")
+
+        task_manager.update_task(task_id, status="running", message="Starting restore...")
+        run_restore_task(task_id, db_id, local_path, db_manager)
+    except Exception as e:
+        task_manager.fail_task(task_id, str(e))
+    finally:
+        if temp_dir:
+            try:
+                for f in Path(temp_dir).glob("*"):
+                    f.unlink(missing_ok=True)
+                Path(temp_dir).rmdir()
+            except Exception:
+                pass
+
+
 @router.post("/databases/{database_id}/backup", response_model=TaskResponse)
 async def start_backup(
     database_id: int,
@@ -83,12 +146,7 @@ async def start_backup(
     """Start a backup operation"""
     
     # Validate database exists
-    db = config_manager.get_database(database_id)
-    if not db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Database with ID {database_id} not found"
-        )
+    db = _get_db_or_404(database_id, config_manager)
     
     # Create task
     task_id = task_manager.create_task(
@@ -117,15 +175,16 @@ async def start_restore(
     """Start a restore operation"""
     
     # Validate database exists
-    db = config_manager.get_database(database_id)
-    if not db:
+    db = _get_db_or_404(database_id, config_manager)
+
+    if restore_request.location not in {"local", "s3"}:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Database with ID {database_id} not found"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid location. Must be 'local' or 's3'"
         )
     
-    # Validate backup file exists
-    if not os.path.exists(restore_request.backup_file):
+    # Validate backup file exists for local restores
+    if restore_request.location == "local" and not os.path.exists(restore_request.backup_file):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Backup file not found: {restore_request.backup_file}"
@@ -138,13 +197,23 @@ async def start_restore(
     )
     
     # Start background task
-    background_tasks.add_task(
-        run_restore_task,
-        task_id,
-        database_id,
-        restore_request.backup_file,
-        db_manager
-    )
+    if restore_request.location == "s3":
+        background_tasks.add_task(
+            run_restore_from_s3_task,
+            task_id,
+            database_id,
+            restore_request.backup_file,
+            db_manager,
+            config_manager
+        )
+    else:
+        background_tasks.add_task(
+            run_restore_task,
+            task_id,
+            database_id,
+            restore_request.backup_file,
+            db_manager
+        )
     
     return TaskResponse(
         task_id=task_id,
@@ -171,21 +240,25 @@ async def get_task_status(task_id: str):
 @router.get("/databases/{database_id}/backups", response_model=List[BackupInfo])
 async def list_backups(
     database_id: int,
+    location: Optional[str] = None,
     db_manager: DBManager = Depends(get_db_manager),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """List backups for a specific database"""
     
     # Validate database exists
-    db = config_manager.get_database(database_id)
-    if not db:
+    _get_db_or_404(database_id, config_manager)
+    
+    if location and location not in {"local", "s3"}:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Database with ID {database_id} not found"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid location. Must be 'local' or 's3'"
         )
     
     # Get backups
     backups = db_manager.list_backups(database_id)
+    if location:
+        backups = [b for b in backups if b.get("location") == location]
     
     # Convert to response model
     backup_list = []
@@ -315,3 +388,54 @@ async def delete_backup(
             )
     else:
         raise HTTPException(status_code=400, detail="Invalid location")
+
+
+@router.post("/databases/{database_id}/backups/sync", response_model=BackupSyncResult)
+async def sync_backups(
+    database_id: int,
+    sync_request: BackupSyncRequest,
+    db_manager: DBManager = Depends(get_db_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """Sync backups between local and S3"""
+    if sync_request.action not in {"upload", "download", "full"}:
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    _, storage = _get_s3_storage(database_id, config_manager, db_manager)
+
+    local_backups = [b for b in db_manager.list_backups(database_id) if b.get("location") == "local"]
+    local_files = {b["filename"] for b in local_backups}
+
+    prefix = f"backups/{database_id}/"
+    s3_backups = storage.list_files(prefix)
+    s3_files = {b["key"].split("/")[-1] for b in s3_backups if not b["key"].endswith(".sha256")}
+
+    only_local = local_files - s3_files
+    only_s3 = s3_files - local_files
+
+    uploaded = 0
+    downloaded = 0
+
+    backup_dir = db_manager._get_backup_dir(database_id)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    if sync_request.action in {"upload", "full"}:
+        for filename in only_local:
+            local_path = backup_dir / filename
+            s3_key = f"backups/{database_id}/{filename}"
+            if storage.upload_file(str(local_path), s3_key):
+                uploaded += 1
+
+    if sync_request.action in {"download", "full"}:
+        for filename in only_s3:
+            s3_key = f"backups/{database_id}/{filename}"
+            local_path = backup_dir / filename
+            if storage.download_file(s3_key, str(local_path)):
+                downloaded += 1
+
+    return BackupSyncResult(
+        uploaded=uploaded,
+        downloaded=downloaded,
+        local_only=len(only_local),
+        s3_only=len(only_s3),
+    )

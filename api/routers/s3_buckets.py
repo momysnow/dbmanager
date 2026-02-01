@@ -67,11 +67,11 @@ async def create_s3_bucket(
     """Create a new S3 bucket configuration"""
     
     # Validate provider
-    valid_providers = ['aws', 'cloudflare', 'minio']
+    valid_providers = {'s3', 'minio', 'garage', 'other', 'aws', 'cloudflare'}
     if bucket.provider not in valid_providers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider. Must be one of: {', '.join(valid_providers)}"
+            detail=f"Invalid provider. Must be one of: {', '.join(sorted(valid_providers))}"
         )
     
     # Convert to dict
@@ -117,11 +117,11 @@ async def update_s3_bucket(
     
     # Validate provider if being updated
     if bucket.provider is not None:
-        valid_providers = ['aws', 'cloudflare', 'minio']
+        valid_providers = {'s3', 'minio', 'garage', 'other', 'aws', 'cloudflare'}
         if bucket.provider not in valid_providers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid provider. Must be one of: {', '.join(valid_providers)}"
+                detail=f"Invalid provider. Must be one of: {', '.join(sorted(valid_providers))}"
             )
     
     # Merge updates

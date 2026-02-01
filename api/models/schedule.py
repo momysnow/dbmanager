@@ -26,3 +26,17 @@ class ScheduleResponse(BaseModel):
     enabled: bool
     next_run: Optional[str] = None
     last_run: Optional[str] = None
+
+
+class CronJobCreate(BaseModel):
+    """Model for creating a cron job"""
+    database_id: int = Field(..., description="Database ID")
+    cron_expression: str = Field(..., description="Cron expression (e.g., '0 2 * * *')")
+
+
+class CronJobResponse(BaseModel):
+    """Model for cron job response"""
+    id: str
+    schedule: str
+    command: str
+    enabled: bool

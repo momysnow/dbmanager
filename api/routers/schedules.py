@@ -6,12 +6,16 @@ from typing import List
 from api.models.schedule import (
     ScheduleCreate,
     ScheduleUpdate,
-    ScheduleResponse
+    ScheduleResponse,
+    CronJobCreate,
+    CronJobResponse
 )
 from api.dependencies import get_config_manager
 from config import ConfigManager
+from core.cron import CronManager
 
 router = APIRouter()
+cron_manager = CronManager()
 
 
 @router.get("/schedules", response_model=List[ScheduleResponse])
@@ -174,3 +178,50 @@ async def toggle_schedule(
     config_manager.save_config()
     
     return ScheduleResponse(**schedule)
+
+
+@router.get("/schedules/cron", response_model=List[CronJobResponse])
+async def list_cron_jobs():
+    """List cron-based backup jobs"""
+    jobs = cron_manager.list_jobs()
+    return [CronJobResponse(**job) for job in jobs]
+
+
+@router.post("/schedules/cron", response_model=CronJobResponse)
+async def add_cron_job(
+    job: CronJobCreate,
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """Create or update a cron-based backup job"""
+    db = config_manager.get_database(job.database_id)
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Database with ID {job.database_id} not found"
+        )
+
+    parts = job.cron_expression.split()
+    if len(parts) != 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid cron expression. Must have 5 parts: minute hour day month weekday"
+        )
+
+    cron_manager.add_backup_job(int(job.database_id), job.cron_expression)
+
+    jobs = cron_manager.list_jobs()
+    created = next((j for j in jobs if str(j.get("id")) == str(job.database_id)), None)
+    if not created:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create cron job"
+        )
+
+    return CronJobResponse(**created)
+
+
+@router.delete("/schedules/cron/{database_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_cron_job(database_id: int):
+    """Delete a cron-based backup job"""
+    cron_manager.remove_job(database_id)
+    return None

@@ -17,6 +17,19 @@ class RestoreRequest(BaseModel):
     location: str = Field("local", description="Location of backup (local/s3)")
 
 
+class BackupSyncRequest(BaseModel):
+    """Model for syncing backups between local and S3"""
+    action: str = Field("full", description="Sync action: upload, download, full")
+
+
+class BackupSyncResult(BaseModel):
+    """Model for sync result"""
+    uploaded: int
+    downloaded: int
+    local_only: int
+    s3_only: int
+
+
 class TaskResponse(BaseModel):
     """Model for task creation response"""
     task_id: str

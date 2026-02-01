@@ -17,6 +17,24 @@ class EncryptionSettings(BaseModel):
     # Password not exposed via API for security
 
 
+class EncryptionUpdate(BaseModel):
+    """Model for updating encryption settings"""
+    enabled: bool = Field(default=False, description="Encryption enabled")
+    password: Optional[str] = Field(default=None, description="Encryption password")
+
+
+class ConfigSyncSettings(BaseModel):
+    """Model for config sync settings"""
+    bucket_id: Optional[int] = Field(default=None, description="S3 bucket ID for config sync")
+
+
+class ConfigSyncStatus(BaseModel):
+    """Model for config sync status"""
+    enabled: bool
+    bucket_id: Optional[int] = None
+    bucket_name: Optional[str] = None
+
+
 class GlobalSettings(BaseModel):
     """Model for global settings"""
     compression: CompressionSettings

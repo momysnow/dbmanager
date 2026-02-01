@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 # Import routers
-from api.routers import databases, backups, s3_buckets, schedules, settings, auth
+from api.routers import databases, backups, s3_buckets, schedules, settings, auth, notifications, dashboard
 from api.deps import get_current_user
 
 # Task manager for background operations
@@ -51,6 +51,8 @@ app.include_router(backups.router, prefix="/api/v1", tags=["Backups"], dependenc
 app.include_router(s3_buckets.router, prefix="/api/v1", tags=["S3 Buckets"], dependencies=[Depends(get_current_user)])
 app.include_router(schedules.router, prefix="/api/v1", tags=["Schedules"], dependencies=[Depends(get_current_user)])
 app.include_router(settings.router, prefix="/api/v1", tags=["Settings"], dependencies=[Depends(get_current_user)])
+app.include_router(notifications.router, prefix="/api/v1", tags=["Notifications"], dependencies=[Depends(get_current_user)])
+app.include_router(dashboard.router, prefix="/api/v1", tags=["Dashboard"], dependencies=[Depends(get_current_user)])
 
 
 @app.get("/api/health")
