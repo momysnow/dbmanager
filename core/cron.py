@@ -60,6 +60,25 @@ class CronManager:
         self.cron.write()
         return True
 
+    def update_schedule(self, db_id: int, schedule: str) -> bool:
+        """Update schedule for an existing job (or create if missing)."""
+        self.remove_job(db_id)
+        return self.add_backup_job(db_id, schedule)
+
+    def set_job_enabled(self, db_id: int, enabled: bool) -> bool:
+        """Enable or disable a job by db_id."""
+        updated = False
+        for job in self.cron:
+            if job.comment == f"dbmanager-backup:{db_id}":
+                if enabled:
+                    job.enable(True)
+                else:
+                    job.enable(False)
+                updated = True
+        if updated:
+            self.cron.write()
+        return updated
+
     def remove_job(self, db_id: int):
         self.cron.remove_all(comment=f"dbmanager-backup:{db_id}")
         self.cron.write()

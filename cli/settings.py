@@ -125,6 +125,24 @@ def settings_menu():
             break
 
 
+def download_config_from_s3():
+    """Download configuration from S3"""
+    current_bucket_id = manager.config_sync.get_config_bucket_id()
+    if not current_bucket_id:
+        print_info("Config sync not configured")
+        get_input("Press Enter to continue...")
+        return
+
+    print_info("This will overwrite the local configuration if S3 version is newer.")
+    if get_confirm("Download config from S3 now?", default=False):
+        console.print("[yellow]Downloading config from S3...[/yellow]")
+        if manager.config_sync.sync_from_s3():
+            print_success("Config downloaded!")
+        else:
+            print_error("Download failed or skipped")
+    get_input("Press Enter to continue...")
+
+
 def export_configuration():
     """Export configuration wizard"""
     from utils.config_export import ConfigExporter

@@ -304,48 +304,57 @@ def verify_backup_wizard(db_id: int):
     table.add_column("Filename")
     table.add_column("Date")
     table.add_column("Size (MB)")
+    table.add_column("Location")
     table.add_column("Checksum")
     
     from pathlib import Path
     for i, backup in enumerate(backups, 1):
-        checksum_file = Path(f"{backup['path']}.sha256")
-        checksum_status = "✅" if checksum_file.exists() else "❌"
+        location = backup.get("location", "local")
+        checksum_status = "—"
+        if location == "local":
+            checksum_file = Path(f"{backup['path']}.sha256")
+            checksum_status = "✅" if checksum_file.exists() else "❌"
         
         table.add_row(
             str(i),
             backup['filename'],
             backup['date'].strftime('%Y-%m-%d %H:%M'),
             f"{backup['size_mb']:.2f}",
+            location,
             checksum_status
         )
     
     console.print(table)
-    console.print(f"\n[dim]✅ = Has checksum  ❌ = No checksum[/dim]\n")
+    console.print(f"\n[dim]✅ = Has checksum  ❌ = No checksum  — = Not available[/dim]\n")
     
     # Ask user to select a backup to verify
     choices = []
     for b in backups:
-        checksum_file = Path(f"{b['path']}.sha256")
-        if checksum_file.exists():
-            label = f"{b['date'].strftime('%Y-%m-%d %H:%M')} | {b['filename']}"
-            choices.append(Choice(value=b['path'], name=label))
+        label = f"{b['date'].strftime('%Y-%m-%d %H:%M')} | {b['filename']}"
+        if b.get("location", "local") == "local":
+            checksum_file = Path(f"{b['path']}.sha256")
+            if checksum_file.exists():
+                choices.append(Choice(value=(b['path'], 'local'), name=label))
+        else:
+            choices.append(Choice(value=(b['path'], 's3'), name=f"{label} [S3]"))
     
     if not choices:
-        print_info("No backups with checksums found")
+        print_info("No backups found")
         return
     
     choices.append(Separator())
     choices.append(Choice(value="cancel", name="← Cancel"))
     
-    backup_path = get_selection("Select backup to verify", choices)
+    backup_choice = get_selection("Select backup to verify", choices)
     
-    if backup_path == "cancel":
+    if backup_choice == "cancel":
         return
     
     # Perform verification
     print_info("Verifying backup integrity...")
     try:
-        result = manager.verify_backup_integrity(backup_path)
+        backup_path, location = backup_choice
+        result = manager.verify_backup_integrity(backup_path, location=location, db_id=db_id)
         
         if result['valid']:
             print_success("✅ Backup is valid and intact!")
@@ -619,11 +628,13 @@ def add_database_wizard():
             s3_enabled = False
 
     try:
-        db_id = manager.add_database(name, provider, params, int(retention) if retention else 0)
+        db_id = manager.add_database(name, provider, params)
+        db_config = manager.config_manager.get_database(db_id)
+        if retention:
+            db_config['retention'] = int(retention)
         
         # Update with S3 settings
         if s3_enabled:
-            db_config = manager.config_manager.get_database(db_id)
             db_config['s3_enabled'] = s3_enabled
             db_config['s3_bucket_id'] = s3_bucket_id
             db_config['s3_retention'] = s3_retention

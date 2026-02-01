@@ -14,6 +14,7 @@ from .backup_utils import save_checksum, verify_backup, verify_checksum
 from .compression import compress_file, get_compression_ratio
 from .encryption import encrypt_file, decrypt_file
 from .notifications import NotificationManager
+from .progress import ProgressStatus
 
 
 BACKUP_ROOT = CONFIG_DIR / "backups"
@@ -169,6 +170,9 @@ class DBManager:
         db_config = self.config_manager.get_database(db_id)
         provider = self.get_provider_instance(db_id)
         backup_dir = self._get_backup_dir(db_id)
+
+        if progress and progress.status == ProgressStatus.IDLE:
+            progress.start(f"Starting backup for {db_config.get('name', db_id)}")
         
         # Get options
         retention = int(db_config.get("retention", 0)) # 0 = infinite (local)
@@ -176,8 +180,13 @@ class DBManager:
         s3_bucket_id = db_config.get("s3_bucket_id")
         s3_retention = int(db_config.get("s3_retention", 0))  # 0 = infinite (S3)
 
-        # Run local backup with progress tracking
-        path = provider.backup(str(backup_dir), progress=progress)
+        try:
+            # Run local backup with progress tracking
+            path = provider.backup(str(backup_dir), progress=progress)
+        except Exception as e:
+            if progress:
+                progress.fail(str(e))
+            raise
         
         # Apply Tag if requested (Rename file)
         if tag:
@@ -218,28 +227,25 @@ class DBManager:
                 level = compression_settings.get("level", 6)
                 
                 print(f"🗜️  Compressing with {algorithm} (level {level})...")
+                original_size = os.path.getsize(path)
                 compressed_path = compress_file(path, algorithm=algorithm, level=level, remove_original=True)
                 
-                # Calculate compression ratio
-                # Since original is removed, we need to use file sizes from before compression
-                original_size = os.path.getsize(compressed_path) / get_compression_ratio(path, compressed_path) if os.path.exists(compressed_path) else 0
-                
                 # Update path to compressed file
-                old_path = path
                 path = compressed_path
                 
                 # Update checksum file reference
                 if checksum_file:
-                    # Rename checksum file to match compressed file
-                    old_checksum = checksum_file
-                    checksum_file = f"{compressed_path}.sha256"
                     try:
-                        os.rename(old_checksum, checksum_file)
-                    except:
-                        # If rename fails, regenerate checksum for compressed file
-                        checksum_file = save_checksum(compressed_path)
+                        Path(checksum_file).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    checksum_file = save_checksum(compressed_path)
                 
-                print(f"✅ Compressed: {os.path.basename(compressed_path)}")
+                if original_size:
+                    ratio = os.path.getsize(compressed_path) / original_size
+                    print(f"✅ Compressed: {os.path.basename(compressed_path)} ({ratio:.2%} of original)")
+                else:
+                    print(f"✅ Compressed: {os.path.basename(compressed_path)}")
             except Exception as e:
                 print(f"⚠️  Compression failed: {e}, using uncompressed backup")
         
@@ -354,6 +360,9 @@ class DBManager:
         if s3_enabled and s3_bucket_id and s3_retention > 0:
             self._enforce_s3_retention(db_id, s3_bucket_id, s3_retention)
             
+        if progress and progress.status not in (ProgressStatus.COMPLETED, ProgressStatus.FAILED):
+            progress.complete(f"Backup completed: {os.path.basename(path)}")
+
         return path
 
     def _enforce_retention(self, db_id: int, keep_last: int):
@@ -480,43 +489,45 @@ class DBManager:
             True if valid
         """
         if location == 'local':
-            return verify_backup(backup_path)['status'] == 'success'
+            return verify_backup(backup_path)['valid']
         elif location == 's3':
-             if not db_id:
-                 raise ValueError("db_id required for S3 verification")
-             
-             db_config = self.config_manager.get_database(db_id)
-             if not db_config or not db_config.get("s3_bucket_id"):
-                 raise ValueError("S3 not configured for this database")
-                 
-             storage = self.bucket_manager.get_storage(db_config.get("s3_bucket_id"))
-             if not storage:
-                 raise ValueError("Bucket storage not found")
-                 
-             # Get file info/metadata
-             info = storage.get_file_info(backup_path)
-             if not info:
-                 raise FileNotFoundError(f"S3 file {backup_path} not found")
-             
-             # Check metadata hash if present
-             stored_hash = info.get('metadata', {}).get('hash')
-             
-             # Alternatively/Additionally check .sha256 file content?
-             # Reading .sha256 file from S3:
-             checksum_key = f"{backup_path}.sha256"
-             
-             # If we have stored hash in metadata, that's best.
-             if stored_hash:
-                 # TODO: We would need to download the file to verify its hash matches the metadata hash.
-                 # That is what verification means.
-                 # For S3, full verification means downloading and hashing.
-                 # Or relying on ETag if it's standard MD5 (not always true for multipart).
-                 # For now, let's just check if we have the checksum info.
-                 # Real verification requires stream downloading.
-                 return True 
-                 
-             # Fallback check existence
-             return True
+            if not db_id:
+                raise ValueError("db_id required for S3 verification")
+
+            db_config = self.config_manager.get_database(db_id)
+            if not db_config or not db_config.get("s3_bucket_id"):
+                raise ValueError("S3 not configured for this database")
+
+            storage = self.bucket_manager.get_storage(db_config.get("s3_bucket_id"))
+            if not storage:
+                raise ValueError("Bucket storage not found")
+
+            info = storage.get_file_info(backup_path)
+            if not info:
+                raise FileNotFoundError(f"S3 file {backup_path} not found")
+
+            from tempfile import TemporaryDirectory
+            from pathlib import Path
+
+            checksum_key = f"{backup_path}.sha256"
+            with TemporaryDirectory() as temp_dir:
+                local_file = str(Path(temp_dir) / Path(backup_path).name)
+                local_checksum = f"{local_file}.sha256"
+
+                if not storage.download_file(backup_path, local_file):
+                    raise RuntimeError("Failed to download S3 backup for verification")
+
+                if storage.get_file_info(checksum_key):
+                    storage.download_file(checksum_key, local_checksum)
+                    return verify_backup(local_file)['valid']
+
+                # If no checksum, use metadata hash if present
+                stored_hash = info.get('metadata', {}).get('hash')
+                if stored_hash:
+                    return verify_checksum(local_file, expected_hash=stored_hash)
+
+                # No checksum available
+                raise FileNotFoundError("S3 checksum not found")
         return False
     
     def restore_database(self, db_id: int, backup_file: str, progress: Optional['BackupProgress'] = None, create_safety_snapshot: bool = True):

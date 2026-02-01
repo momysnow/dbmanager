@@ -6,7 +6,7 @@ from InquirerPy.separator import Separator
 from cli import console, manager, cron_manager
 from utils.ui import (
     print_header, get_input, print_success, print_error, 
-    print_info, get_selection
+    print_info, get_selection, get_confirm
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21,6 +21,7 @@ def schedule_menu():
         choices = [
             Choice("add", "Schedule New Backup"),
             Choice("list", "List Scheduled Jobs"),
+            Choice("manage", "Manage Scheduled Jobs"),
             Separator(),
             Choice("back", "Back to Main Menu")
         ]
@@ -29,6 +30,7 @@ def schedule_menu():
         if action == "back": break
         elif action == "add": schedule_wizard()
         elif action == "list": list_jobs_wizard()
+        elif action == "manage": manage_jobs_wizard()
 
 def list_jobs_wizard():
     jobs = cron_manager.list_jobs()
@@ -44,6 +46,70 @@ def list_jobs_wizard():
         console.print(table)
     get_input("Press Enter...")
 
+
+def manage_jobs_wizard():
+    jobs = cron_manager.list_jobs()
+    if not jobs:
+        print_info("No scheduled jobs to manage.")
+        get_input("Press Enter...")
+        return
+
+    print_header()
+    console.print("\n[bold cyan]═══ Manage Scheduled Jobs ═══[/bold cyan]\n")
+
+    choices = [
+        Choice(value="back", name="← Back"),
+        Separator(),
+    ] + [
+        Choice(value=job["id"], name=f"DB {job['id']} | {job['schedule']} | {'Enabled' if job['enabled'] else 'Disabled'}")
+        for job in jobs
+    ]
+
+    selected = get_selection("Select Job", choices)
+    if selected == "back":
+        return
+
+    job = next((j for j in jobs if str(j.get("id")) == str(selected)), None)
+    if not job:
+        print_error("Job not found")
+        get_input("Press Enter...")
+        return
+
+    actions = [
+        Choice(value="edit", name="Edit Schedule"),
+        Choice(value="toggle", name="Enable/Disable"),
+        Choice(value="delete", name="Delete Job"),
+        Separator(),
+        Choice(value="back", name="← Back")
+    ]
+    action = get_selection("Job Actions", actions)
+    if action == "back":
+        return
+
+    if action == "edit":
+        new_schedule = _prompt_schedule(default=job["schedule"])
+        if not new_schedule:
+            return
+        if cron_manager.update_schedule(int(job["id"]), new_schedule):
+            print_success("Schedule updated.")
+        else:
+            print_error("Failed to update schedule")
+        get_input("Press Enter...")
+
+    elif action == "toggle":
+        desired = not job["enabled"]
+        if cron_manager.set_job_enabled(int(job["id"]), desired):
+            print_success("Job enabled" if desired else "Job disabled")
+        else:
+            print_error("Failed to update job status")
+        get_input("Press Enter...")
+
+    elif action == "delete":
+        if get_confirm("Delete this scheduled job?", default=False):
+            cron_manager.remove_job(int(job["id"]))
+            print_success("Job deleted")
+        get_input("Press Enter...")
+
 def schedule_wizard():
     dbs = manager.list_databases()
     if not dbs:
@@ -58,6 +124,20 @@ def schedule_wizard():
     db_id = get_selection("Select Database to Schedule", choices)
     if db_id == "back": return
 
+    schedule = _prompt_schedule()
+    if not schedule:
+        return
+    
+    try:
+        cron_manager.add_backup_job(int(db_id), schedule)
+        print_success("Schedule updated.")
+        get_input("Press Enter...")
+    except Exception as e:
+        print_error(f"Error: {e}")
+        get_input("Press Enter...")
+
+
+def _prompt_schedule(default: str = "0 0 * * *"):
     presets = [
         Choice("back", "← Back"),
         Separator(),
@@ -68,21 +148,12 @@ def schedule_wizard():
         Separator(),
         Choice("custom", "Custom Schedule")
     ]
-    
+
     selected_schedule = get_selection("Select Schedule Preset", presets)
-    
+
     if selected_schedule == "back":
-        return
+        return None
     elif selected_schedule == "custom":
         print_info("Cron Format: * * * * * (min hour day month day_of_week)")
-        schedule = get_input("Enter Cron Schedule:", "0 0 * * *")
-    else:
-        schedule = get_input("Confirm/Edit Schedule:", default=selected_schedule)
-    
-    try:
-        cron_manager.add_backup_job(int(db_id), schedule)
-        print_success("Schedule updated.")
-        get_input("Press Enter...")
-    except Exception as e:
-        print_error(f"Error: {e}")
-        get_input("Press Enter...")
+        return get_input("Enter Cron Schedule:", default)
+    return get_input("Confirm/Edit Schedule:", default=selected_schedule)
