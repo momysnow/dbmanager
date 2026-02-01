@@ -113,12 +113,13 @@ class ConfigSync:
                 print(f"⚠️ Config sync failed: {e}")
             return False
     
-    def sync_from_s3(self, force: bool = False) -> bool:
+    def sync_from_s3(self, force: bool = False, interactive: bool = True) -> bool:
         """
         Download config.json from S3
         
         Args:
             force: If True, overwrite local config without checking timestamps
+            interactive: If True, prompt user when local config is newer
         
         Returns:
             True if successful, False otherwise
@@ -153,6 +154,9 @@ class ConfigSync:
                 
                 if local_mtime > s3_mtime:
                     print(f"ℹ️  Local config is newer (local: {local_mtime}, S3: {s3_mtime})")
+                    if not interactive:
+                        print("   Skipping download in non-interactive mode")
+                        return False
                     response = input("   Overwrite with S3 version? (y/n): ").lower().strip()
                     if response != 'y':
                         print("   Keeping local config")

@@ -122,6 +122,10 @@ def run_restore_from_s3_task(
         if not storage.download_file(s3_key, local_path):
             raise RuntimeError("Failed to download backup from S3")
 
+        checksum_key = f"{s3_key}.sha256"
+        if storage.get_file_info(checksum_key):
+            storage.download_file(checksum_key, f"{local_path}.sha256")
+
         task_manager.update_task(task_id, status="running", message="Starting restore...")
         run_restore_task(task_id, db_id, local_path, db_manager)
     except Exception as e:

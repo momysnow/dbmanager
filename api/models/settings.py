@@ -35,6 +35,17 @@ class ConfigSyncStatus(BaseModel):
     bucket_name: Optional[str] = None
 
 
+class ConfigSyncInfo(BaseModel):
+    """Model for config sync info"""
+    enabled: bool
+    bucket_id: Optional[int] = None
+    bucket_name: Optional[str] = None
+    local_mtime: Optional[str] = None
+    s3_mtime: Optional[str] = None
+    is_local_newer: Optional[bool] = None
+    is_s3_newer: Optional[bool] = None
+
+
 class GlobalSettings(BaseModel):
     """Model for global settings"""
     compression: CompressionSettings

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 from fastapi.responses import FileResponse
 import os
 import tempfile
+from datetime import datetime
 
 from api.models.settings import (
     CompressionSettings,
@@ -11,13 +12,15 @@ from api.models.settings import (
     GlobalSettings,
     EncryptionUpdate,
     ConfigSyncSettings,
-    ConfigSyncStatus
+    ConfigSyncStatus,
+    ConfigSyncInfo
 )
 from api.dependencies import get_config_manager
 from config import ConfigManager
 from core.config_sync import ConfigSync
 from core.bucket_manager import BucketManager
 from utils.config_export import ConfigExporter
+from config import CONFIG_FILE
 
 router = APIRouter()
 
@@ -189,8 +192,44 @@ async def download_config_from_s3(
 ):
     """Download config from S3"""
     config_sync = ConfigSync(BucketManager(config_manager), config_manager)
-    success = config_sync.sync_from_s3(force=force)
+    success = config_sync.sync_from_s3(force=force, interactive=False)
     return {"success": success}
+
+
+@router.get("/settings/config-sync/info", response_model=ConfigSyncInfo)
+async def get_config_sync_info(
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """Get config sync info and comparison"""
+    bucket_id = config_manager.config.get("config_sync_bucket_id")
+    bucket_name = None
+    if bucket_id:
+        bucket_name = BucketManager(config_manager).get_bucket_name(bucket_id)
+
+    config_sync = ConfigSync(BucketManager(config_manager), config_manager)
+    s3_info = config_sync.get_s3_config_info() if bucket_id else None
+    s3_mtime = s3_info.get("last_modified") if s3_info else None
+
+    local_mtime = None
+    if CONFIG_FILE.exists():
+        local_mtime = datetime.fromtimestamp(CONFIG_FILE.stat().st_mtime)
+
+    is_local_newer = None
+    is_s3_newer = None
+    if local_mtime and s3_mtime:
+        s3_compare = s3_mtime.replace(tzinfo=None) if s3_mtime.tzinfo else s3_mtime
+        is_local_newer = local_mtime > s3_compare
+        is_s3_newer = s3_compare > local_mtime
+
+    return ConfigSyncInfo(
+        enabled=bool(bucket_id),
+        bucket_id=bucket_id,
+        bucket_name=bucket_name,
+        local_mtime=local_mtime.isoformat() if local_mtime else None,
+        s3_mtime=s3_mtime.isoformat() if s3_mtime else None,
+        is_local_newer=is_local_newer,
+        is_s3_newer=is_s3_newer
+    )
 
 
 @router.post("/settings/export")
