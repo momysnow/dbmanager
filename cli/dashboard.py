@@ -3,8 +3,6 @@
 from InquirerPy.base.control import Choice
 from InquirerPy.separator import Separator
 from rich.table import Table
-from rich.progress import Progress, BarColumn, TextColumn
-from datetime import datetime
 
 from cli import console, manager
 from utils.ui import print_header, get_selection, get_input

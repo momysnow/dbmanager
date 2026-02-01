@@ -7,6 +7,47 @@ from cli import console, manager
 from utils.ui import print_header, get_selection, get_input, get_confirm, print_success, print_error, print_info
 
 
+def _status_label(enabled: bool) -> str:
+    return "✅ Enabled" if enabled else "❌ Disabled"
+
+
+def _parse_int(value: str, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _configure_webhook(channel_key: str, title: str, help_text: str):
+    print_header()
+    console.print(f"\n[bold cyan]═══ {title} ═══[/bold cyan]\n")
+    
+    current = manager.config_manager.get_notification_settings(channel_key)
+    enabled = get_confirm(
+        f"Enable {title.split(' Notifications')[0]} notifications? (currently: {'enabled' if current.get('enabled') else 'disabled'})",
+        default=current.get('enabled', False)
+    )
+    
+    if enabled:
+        console.print("\n[bold]Webhook URL:[/bold]")
+        console.print(f"[dim]{help_text}[/dim]\n")
+        
+        webhook_url = get_input("Webhook URL:", default=current.get('webhook_url', ''))
+        if not webhook_url:
+            print_error("Webhook URL is required")
+            return
+        
+        manager.config_manager.update_notification_settings(
+            channel_key,
+            enabled=True,
+            webhook_url=webhook_url
+        )
+        print_success(f"{title} enabled")
+    else:
+        manager.config_manager.update_notification_settings(channel_key, enabled=False)
+        print_success(f"{title} disabled")
+
+
 def notification_menu():
     """Configure notification settings"""
     while True:
@@ -20,10 +61,10 @@ def notification_menu():
         discord_settings = manager.config_manager.get_notification_settings("discord")
         
         # Show status
-        console.print(f"[bold]Email:[/bold] {'✅ Enabled' if email_settings.get('enabled') else '❌ Disabled'}")
-        console.print(f"[bold]Slack:[/bold] {'✅ Enabled' if slack_settings.get('enabled') else '❌ Disabled'}")
-        console.print(f"[bold]Teams:[/bold] {'✅ Enabled' if teams_settings.get('enabled') else '❌ Disabled'}")
-        console.print(f"[bold]Discord:[/bold] {'✅ Enabled' if discord_settings.get('enabled') else '❌ Disabled'}")
+        console.print(f"[bold]Email:[/bold] {_status_label(email_settings.get('enabled'))}")
+        console.print(f"[bold]Slack:[/bold] {_status_label(slack_settings.get('enabled'))}")
+        console.print(f"[bold]Teams:[/bold] {_status_label(teams_settings.get('enabled'))}")
+        console.print(f"[bold]Discord:[/bold] {_status_label(discord_settings.get('enabled'))}")
         console.print()
         
         choices = [
@@ -76,11 +117,10 @@ def configure_email_notifications():
         if not smtp_host:
             smtp_host = current.get('smtp_host', 'smtp.gmail.com')
         
-        smtp_port = get_input("SMTP Port:", default=str(current.get('smtp_port', 587)))
-        try:
-            smtp_port = int(smtp_port)
-        except:
-            smtp_port = 587
+        smtp_port = _parse_int(
+            get_input("SMTP Port:", default=str(current.get('smtp_port', 587))),
+            587
+        )
         
         smtp_username = get_input("SMTP Username:", default=current.get('smtp_username', ''))
         smtp_password = get_input("SMTP Password:", default=current.get('smtp_password', ''))
@@ -114,101 +154,29 @@ def configure_email_notifications():
 
 def configure_slack_notifications():
     """Configure Slack webhook notifications"""
-    print_header()
-    console.print("\n[bold cyan]═══ Slack Notifications ═══[/bold cyan]\n")
-    
-    current = manager.config_manager.get_notification_settings("slack")
-    
-    enabled = get_confirm(
-        f"Enable Slack notifications? (currently: {'enabled' if current.get('enabled') else 'disabled'})",
-        default=current.get('enabled', False)
+    _configure_webhook(
+        "slack",
+        "Slack Notifications",
+        "Get webhook URL from: https://api.slack.com/messaging/webhooks"
     )
-    
-    if enabled:
-        console.print("\n[bold]Webhook URL:[/bold]")
-        console.print("[dim]Get webhook URL from: https://api.slack.com/messaging/webhooks[/dim]\n")
-        
-        webhook_url = get_input("Webhook URL:", default=current.get('webhook_url', ''))
-        
-        if not webhook_url:
-            print_error("Webhook URL is required")
-            return
-        
-        manager.config_manager.update_notification_settings(
-            "slack",
-            enabled=True,
-            webhook_url=webhook_url
-        )
-        print_success("Slack notifications enabled")
-    else:
-        manager.config_manager.update_notification_settings("slack", enabled=False)
-        print_success("Slack notifications disabled")
 
 
 def configure_teams_notifications():
     """Configure Microsoft Teams webhook notifications"""
-    print_header()
-    console.print("\n[bold cyan]═══ Microsoft Teams Notifications ═══[/bold cyan]\n")
-    
-    current = manager.config_manager.get_notification_settings("teams")
-    
-    enabled = get_confirm(
-        f"Enable Teams notifications? (currently: {'enabled' if current.get('enabled') else 'disabled'})",
-        default=current.get('enabled', False)
+    _configure_webhook(
+        "teams",
+        "Microsoft Teams Notifications",
+        "Create incoming webhook in Teams channel settings"
     )
-    
-    if enabled:
-        console.print("\n[bold]Webhook URL:[/bold]")
-        console.print("[dim]Create incoming webhook in Teams channel settings[/dim]\n")
-        
-        webhook_url = get_input("Webhook URL:", default=current.get('webhook_url', ''))
-        
-        if not webhook_url:
-            print_error("Webhook URL is required")
-            return
-        
-        manager.config_manager.update_notification_settings(
-            "teams",
-            enabled=True,
-            webhook_url=webhook_url
-        )
-        print_success("Teams notifications enabled")
-    else:
-        manager.config_manager.update_notification_settings("teams", enabled=False)
-        print_success("Teams notifications disabled")
 
 
 def configure_discord_notifications():
     """Configure Discord webhook notifications"""
-    print_header()
-    console.print("\n[bold cyan]═══ Discord Notifications ═══[/bold cyan]\n")
-    
-    current = manager.config_manager.get_notification_settings("discord")
-    
-    enabled = get_confirm(
-        f"Enable Discord notifications? (currently: {'enabled' if current.get('enabled') else 'disabled'})",
-        default=current.get('enabled', False)
+    _configure_webhook(
+        "discord",
+        "Discord Notifications",
+        "Server Settings → Integrations → Webhooks"
     )
-    
-    if enabled:
-        console.print("\n[bold]Webhook URL:[/bold]")
-        console.print("[dim]Server Settings → Integrations → Webhooks[/dim]\n")
-        
-        webhook_url = get_input("Webhook URL:", default=current.get('webhook_url', ''))
-        
-        if not webhook_url:
-            print_error("Webhook URL is required")
-            return
-        
-        manager.config_manager.update_notification_settings(
-            "discord",
-            enabled=True,
-            webhook_url=webhook_url
-        )
-        print_success("Discord notifications enabled")
-    else:
-        manager.config_manager.update_notification_settings("discord", enabled=False)
-        print_success("Discord notifications disabled")
 
 
 def test_notifications():
