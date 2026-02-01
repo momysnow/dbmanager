@@ -4,7 +4,6 @@ InquirerPy
 rich
 pydantic
 python-crontab
-structlog
 
 # API
 fastapi
@@ -17,7 +16,6 @@ requests
 psycopg2-binary
 pymysql>=1.1.0
 pymssql>=2.2.11
-pymongo>=4.0.0
 
 # Cloud storage
 boto3>=1.34.0

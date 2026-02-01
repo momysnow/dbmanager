@@ -95,7 +95,7 @@ python main.py interactive
 All Python dependencies are in `requirements.txt`:
 
 - **Core**: typer, InquirerPy, rich, pydantic
-- **Database drivers**: psycopg2-binary, pymysql, pymssql, pymongo
+- **Database drivers**: psycopg2-binary, pymysql, pymssql
 - **Cloud**: boto3
 - **API**: fastapi, uvicorn
 - **Utilities**: requests, zstandard

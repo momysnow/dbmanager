@@ -82,7 +82,7 @@ python main.py interactive
 - **Python 3.10+**
 - **CLI**: Typer, InquirerPy, Rich
 - **API**: FastAPI, Uvicorn
-- **Database Drivers**: psycopg2, pymysql, pymssql, pymongo
+- **Database Drivers**: psycopg2, pymysql, pymssql
 - **Cloud**: boto3 (S3)
 - **Compression**: zstandard
 - **Encryption**: cryptography
@@ -136,12 +136,6 @@ open http://localhost:8000/docs
 
 # Backup via API
 curl -X POST http://localhost:8000/api/v1/backups/1
-```
-
-## 🧪 Testing
-
-```bash
-python -m pytest tests/
 ```
 
 ## 📄 License

@@ -12,18 +12,26 @@ class MongoDBProvider(BaseProvider):
     def __init__(self, db_config: dict):
         super().__init__(db_config)
         
+        params = db_config.get("params", {})
         # MongoDB can use URI or individual params
-        self.uri = db_config.get("uri")  # Optional: mongodb://user:pass@host:port/db
+        self.uri = params.get("uri") or db_config.get("uri")
         
         if not self.uri:
             # Build connection from individual params
-            auth_str = ""
-            if self.username and self.password:
-                auth_str = f"{self.username}:{self.password}@"
+            host = params.get("host", "localhost")
+            port = params.get("port", 27017)
+            user = params.get("user")
+            password = params.get("password")
+            database = params.get("database")
             
-            self.uri = f"mongodb://{auth_str}{self.host}:{self.port}/{self.database}"
+            auth_str = ""
+            if user and password:
+                auth_str = f"{user}:{password}@"
+            
+            db_part = f"/{database}" if database else ""
+            self.uri = f"mongodb://{auth_str}{host}:{port}{db_part}"
     
-    def test_connection(self) -> bool:
+    def check_connection(self) -> bool:
         """Test MongoDB connection"""
         try:
             # Use mongosh or mongo to test connection
@@ -46,6 +54,10 @@ class MongoDBProvider(BaseProvider):
         except Exception as e:
             print(f"Connection test failed: {e}")
             return False
+    
+    def test_connection(self) -> bool:
+        """Backward-compatible alias for check_connection"""
+        return self.check_connection()
     
     def _has_mongosh(self) -> bool:
         """Check if mongosh (new shell) is available"""
