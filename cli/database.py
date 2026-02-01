@@ -297,6 +297,15 @@ def verify_backup_wizard(db_id: int):
     if not backups:
         print_info("No local backups found")
         return
+
+    scope_choices = [
+        Choice(value="local", name="Local backups"),
+        Choice(value="s3", name="S3 backups"),
+        Choice(value="all", name="All backups"),
+    ]
+    scope = get_selection("Select backup location", scope_choices)
+    if scope in {"local", "s3"}:
+        backups = [b for b in backups if b.get("location", "local") == scope]
     
     # Display backups with checksum status
     table = Table(show_header=True, header_style="bold magenta")
@@ -339,7 +348,10 @@ def verify_backup_wizard(db_id: int):
             choices.append(Choice(value=(b['path'], 's3'), name=f"{label} [S3]"))
     
     if not choices:
-        print_info("No backups found")
+        if scope == "local":
+            print_info("No local backups with checksums found")
+        else:
+            print_info("No backups found")
         return
     
     choices.append(Separator())
@@ -354,17 +366,12 @@ def verify_backup_wizard(db_id: int):
     print_info("Verifying backup integrity...")
     try:
         backup_path, location = backup_choice
-        result = manager.verify_backup_integrity(backup_path, location=location, db_id=db_id)
+        is_valid = manager.verify_backup_integrity(backup_path, location=location, db_id=db_id)
         
-        if result['valid']:
+        if is_valid:
             print_success("✅ Backup is valid and intact!")
-            console.print(f"   File size: {result['file_size'] / (1024*1024):.2f} MB")
-            if result['checksum_valid']:
-                print_success("   Checksum: VERIFIED")
         else:
             print_error("❌ Backup verification FAILED")
-            for error in result['errors']:
-                console.print(f"   • {error}", style="red")
     except Exception as e:
         print_error(f"Verification error: {e}")
 

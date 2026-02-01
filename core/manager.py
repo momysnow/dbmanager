@@ -372,6 +372,8 @@ class DBManager:
             for b in to_delete:
                 try:
                     Path(b["path"]).unlink()
+                    checksum_path = Path(f"{b['path']}.sha256")
+                    checksum_path.unlink(missing_ok=True)
                 except Exception:
                     pass
     
@@ -402,6 +404,7 @@ class DBManager:
                 for backup in to_delete:
                     try:
                         storage.delete_file(backup['key'])
+                        storage.delete_file(f"{backup['key']}.sha256")
                         print(f"🗑️ Deleted old S3 backup: {backup['key']}")
                     except Exception as e:
                         print(f"⚠️ Failed to delete S3 backup {backup['key']}: {e}")

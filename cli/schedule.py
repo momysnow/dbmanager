@@ -138,6 +138,23 @@ def schedule_wizard():
 
 
 def _prompt_schedule(default: str = "0 0 * * *"):
+    mode_choices = [
+        Choice("simple", "Simple schedule (recommended)"),
+        Choice("preset", "Preset cron"),
+        Choice("custom", "Custom cron"),
+        Choice("back", "← Back")
+    ]
+    mode = get_selection("Schedule Type", mode_choices)
+    if mode == "back":
+        return None
+
+    if mode == "simple":
+        return _simple_schedule_builder()
+
+    if mode == "custom":
+        print_info("Cron Format: * * * * * (min hour day month day_of_week)")
+        return get_input("Enter Cron Schedule:", default)
+
     presets = [
         Choice("back", "← Back"),
         Separator(),
@@ -150,10 +167,76 @@ def _prompt_schedule(default: str = "0 0 * * *"):
     ]
 
     selected_schedule = get_selection("Select Schedule Preset", presets)
-
     if selected_schedule == "back":
         return None
-    elif selected_schedule == "custom":
+    if selected_schedule == "custom":
         print_info("Cron Format: * * * * * (min hour day month day_of_week)")
         return get_input("Enter Cron Schedule:", default)
     return get_input("Confirm/Edit Schedule:", default=selected_schedule)
+
+
+def _simple_schedule_builder():
+    console.print("\n[bold]Simple schedule builder[/bold]")
+    console.print("Choose frequency and time; we will build the cron expression.")
+
+    freq_choices = [
+        Choice("daily", "Daily"),
+        Choice("weekly", "Weekly"),
+        Choice("monthly", "Monthly"),
+        Choice("hourly", "Every N hours"),
+        Choice("back", "← Back")
+    ]
+    frequency = get_selection("Frequency", freq_choices)
+    if frequency == "back":
+        return None
+
+    if frequency == "hourly":
+        hours = get_input("Every how many hours?", "6")
+        try:
+            hours = int(hours)
+            if hours < 1 or hours > 24:
+                raise ValueError()
+        except Exception:
+            print_error("Invalid hour interval (1-24)")
+            return None
+        return f"0 */{hours} * * *"
+
+    time_str = get_input("Time (HH:MM)", "02:00")
+    try:
+        hour_str, minute_str = time_str.split(":")
+        hour = int(hour_str)
+        minute = int(minute_str)
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError()
+    except Exception:
+        print_error("Invalid time format")
+        return None
+
+    if frequency == "daily":
+        return f"{minute} {hour} * * *"
+
+    if frequency == "weekly":
+        day_choices = [
+            Choice("0", "Sunday"),
+            Choice("1", "Monday"),
+            Choice("2", "Tuesday"),
+            Choice("3", "Wednesday"),
+            Choice("4", "Thursday"),
+            Choice("5", "Friday"),
+            Choice("6", "Saturday"),
+        ]
+        day = get_selection("Day of week", day_choices)
+        return f"{minute} {hour} * * {day}"
+
+    if frequency == "monthly":
+        day = get_input("Day of month (1-28)", "1")
+        try:
+            day = int(day)
+            if day < 1 or day > 28:
+                raise ValueError()
+        except Exception:
+            print_error("Invalid day of month (1-28)")
+            return None
+        return f"{minute} {hour} {day} * *"
+
+    return None

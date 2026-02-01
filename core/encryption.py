@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     ENCRYPTION_AVAILABLE = True
 except ImportError:
     ENCRYPTION_AVAILABLE = False
@@ -41,7 +41,7 @@ def derive_key_from_password(password: str, salt: bytes) -> bytes:
     if not ENCRYPTION_AVAILABLE:
         raise EncryptionError("Encryption not available. Install: pip install cryptography")
     
-    kdf = PBKDF2(
+    kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,  # 256 bits
         salt=salt,
