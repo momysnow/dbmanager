@@ -95,6 +95,24 @@ All database tools pre-installed:
 - SQL Server tools (mssql-tools18)
 - MongoDB Database Tools
 
+### Environment variables
+
+You can configure the API auth and encryption via environment variables (recommended for Docker).
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| DBMANAGER_CREATE_ADMIN | Create admin user on first run | true |
+| DBMANAGER_ADMIN_USER | Initial admin username | admin |
+| DBMANAGER_ADMIN_PASSWORD | Initial admin password | admin |
+| DBMANAGER_JWT_SECRET | JWT secret for API tokens | (generated) |
+| DBMANAGER_MASTER_KEY | Master key for config encryption (Fernet) | (generated) |
+
+Copy .env.example and edit values:
+
+```bash
+cp .env.example .env
+```
+
 ## 📝 Configuration
 
 Config stored in: `~/.dbmanager/config.json`

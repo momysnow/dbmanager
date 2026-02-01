@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 from typing import Optional, Dict
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -26,6 +27,11 @@ class AuthManager:
         self.secret_key = self._get_or_create_secret_key()
 
     def _get_or_create_secret_key(self) -> str:
+        # Environment override
+        env_secret = os.getenv("DBMANAGER_JWT_SECRET")
+        if env_secret:
+            return env_secret
+
         # Check config
         auth_config = self.config_manager.config.get("auth", {})
         secret = auth_config.get("jwt_secret")
@@ -68,6 +74,8 @@ class AuthManager:
     
     def create_initial_user(self, username: str = "admin", password: str = "admin") -> bool:
         """Create initial admin user if no users exist"""
+        if not username or not password:
+            return False
         users = self.config_manager.config.get("users", [])
         if not users:
             hashed = self.get_password_hash(password)

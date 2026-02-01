@@ -1,4 +1,5 @@
 from fastapi import Depends, HTTPException, status
+import os
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from core.auth import AuthManager
@@ -10,8 +11,12 @@ config_manager = ConfigManager()
 auth_manager = AuthManager(config_manager)
 
 # Create initial user if needed (on startup import)
-# Ideally this should be in main startup event, but fine here for now
-auth_manager.create_initial_user()
+# Allows configuration via environment variables
+create_admin = os.getenv("DBMANAGER_CREATE_ADMIN", "true").lower() not in {"0", "false", "no"}
+if create_admin:
+    admin_user = os.getenv("DBMANAGER_ADMIN_USER", "admin")
+    admin_password = os.getenv("DBMANAGER_ADMIN_PASSWORD", "admin")
+    auth_manager.create_initial_user(username=admin_user, password=admin_password)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
 
