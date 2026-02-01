@@ -29,4 +29,5 @@ docker
 cryptography
 zstandard
 python-jose[cryptography]
-passlib[bcrypt]
+passlib[argon2]
+argon2-cffi

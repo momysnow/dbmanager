@@ -5,7 +5,7 @@ from core.manager import DBManager
 
 # Global instances
 config_manager = ConfigManager()
-db_manager = DBManager(config_manager)
+db_manager = DBManager()
 
 
 def get_config_manager() -> ConfigManager:

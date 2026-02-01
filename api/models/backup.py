@@ -14,6 +14,7 @@ class RestoreRequest(BaseModel):
     """Model for initiating a restore"""
     database_id: int = Field(..., description="Database ID to restore to")
     backup_file: str = Field(..., description="Path to backup file")
+    location: str = Field("local", description="Location of backup (local/s3)")
 
 
 class TaskResponse(BaseModel):
@@ -46,3 +47,5 @@ class BackupInfo(BaseModel):
     date: str
     database_id: int
     has_checksum: bool
+    location: str = "local"
+    checksum_verified: Optional[bool] = None

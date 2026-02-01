@@ -3,8 +3,11 @@ services:
     build: .
     container_name: dbmanager
     volumes:
+      - .:/app
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock # Docker API access
+    ports:
+      - "8000:8000"
     environment:
       - DBMANAGER_DATA_DIR=/app/data
     # Enable TTY for interactive mode

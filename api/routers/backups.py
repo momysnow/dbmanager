@@ -190,13 +190,21 @@ async def list_backups(
     # Convert to response model
     backup_list = []
     for backup in backups:
+        # Determine checksum verification status
+        # Since we don't have stored result, we could assume False or None until explicitly verified.
+        # But 'has_checksum' is a good proxy for integrity availability.
+        
         backup_info = BackupInfo(
             path=backup['path'],
             filename=backup['filename'],
             size_mb=backup['size_mb'],
             date=backup['date'].isoformat(),
             database_id=database_id,
-            has_checksum=Path(f"{backup['path']}.sha256").exists()
+            has_checksum=backup.get('has_checksum', False),
+            location=backup.get('location', 'local'),
+            # checksum_verified could be populated if we stored verification status, 
+            # but for now let's leave it as None (unknown) or check file existence?
+            # It's an optional field.
         )
         backup_list.append(backup_info)
     
@@ -205,23 +213,36 @@ async def list_backups(
 
 @router.post("/backups/verify", response_model=dict)
 async def verify_backup(
-    backup_file: str,
+    # We need to accept complex object or query params. 
+    # Use Body or improved Request model. 
+    # To keep simple without new model file edits for now (wait, we edited DB model, we can edit Backup model or use dict body)
+    # Let's use simple body dict
+    payload: dict,
     db_manager: DBManager = Depends(get_db_manager)
 ):
     """Verify backup integrity"""
+    backup_file = payload.get("backup_file")
+    location = payload.get("location", "local")
+    database_id = payload.get("database_id")
     
-    if not os.path.exists(backup_file):
+    if not backup_file:
+         raise HTTPException(status_code=400, detail="backup_file required")
+    
+    if location == 's3' and not database_id:
+         raise HTTPException(status_code=400, detail="database_id required for S3 verification")
+
+    if location == 'local' and not os.path.exists(backup_file):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Backup file not found: {backup_file}"
         )
     
     try:
-        result = db_manager.verify_backup_integrity(backup_file)
+        result = db_manager.verify_backup_integrity(backup_file, location=location, db_id=database_id)
         return {
             "file": backup_file,
             "valid": result,
-            "message": "Backup is valid" if result else "Backup verification failed"
+            "message": "Backup integrity verified" if result else "Backup integrity check failed"
         }
     except Exception as e:
         raise HTTPException(
@@ -232,28 +253,65 @@ async def verify_backup(
 
 @router.delete("/backups", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_backup(
-    backup_file: str
+    backup_file: str,
+    location: str = "local",
+    database_id: int = None,
+    config_manager: ConfigManager = Depends(get_config_manager),
+    db_manager: DBManager = Depends(get_db_manager)
 ):
     """Delete a backup file"""
     
-    if not os.path.exists(backup_file):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Backup file not found: {backup_file}"
-        )
-    
-    try:
-        # Delete backup file
-        os.remove(backup_file)
+    if location == "local":
+        if not os.path.exists(backup_file):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Backup file not found: {backup_file}"
+            )
         
-        # Also delete checksum if exists
-        checksum_file = f"{backup_file}.sha256"
-        if os.path.exists(checksum_file):
-            os.remove(checksum_file)
+        try:
+            # Delete backup file
+            os.remove(backup_file)
+            
+            # Also delete checksum if exists
+            checksum_file = f"{backup_file}.sha256"
+            if os.path.exists(checksum_file):
+                os.remove(checksum_file)
+            
+            return None
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete backup: {str(e)}"
+            )
+            
+    elif location == "s3":
+        if not database_id:
+            raise HTTPException(status_code=400, detail="database_id required for S3 deletion")
+            
+        db_config = config_manager.get_database(database_id)
+        if not db_config or not db_config.get("s3_bucket_id"):
+             raise HTTPException(status_code=400, detail="S3 not configured for this database")
         
-        return None
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete backup: {str(e)}"
-        )
+        bucket_id = db_config.get("s3_bucket_id")
+        storage = db_manager.bucket_manager.get_storage(bucket_id)
+        if not storage:
+             raise HTTPException(status_code=404, detail="Bucket storage not found")
+        
+        try:
+            # Delete file from S3 using key (backup_file)
+            storage.delete_file(backup_file)
+            
+            # Try delete checksum
+            try:
+                storage.delete_file(f"{backup_file}.sha256")
+            except:
+                pass
+                
+            return None
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete S3 backup: {str(e)}"
+            )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid location")

@@ -5,7 +5,7 @@ FROM python:3.10-slim-bullseye
 # mariadb-client: for mysqldump/mysql
 # cron: for scheduling
 # curl, gnupg2, ca-certificates: for adding MS repos
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends \
     mariadb-client \
     cron \
     nano \
@@ -38,12 +38,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Install MongoDB Database Tools
-# Note: MongoDB provides packages for Debian 11 (Bullseye)
-RUN wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/mongodb-org-7.0.gpg \
-    && echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/debian bullseye/mongodb-org/7.0 main" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list \
-    && apt-get update \
-    && apt-get install -y mongodb-database-tools \
-    && rm -rf /var/lib/apt/lists/*
+# Note: MongoDB provides packages for Debian 11 (Bullseye) but failures observed on arm64
+# RUN curl -fsSL https://www.mongodb.org/static/pgp/server-6.0.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/mongodb-org-6.0.gpg \
+#     && echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/debian bullseye/mongodb-org/6.0 main" | tee /etc/apt/sources.list.d/mongodb-org-6.0.list \
+#     && apt-get update \
+#     && apt-get install -y mongodb-database-tools \
+#     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="$PATH:/opt/mssql-tools18/bin"
 
@@ -66,6 +66,8 @@ ENV DBMANAGER_DATA_DIR=/app/data
 RUN echo '#!/bin/bash\n\
     # Start cron in background\n\
     cron\n\
+    # Start API server in background\n\
+    python main.py start-api\n\
     # Keep container running or execute command\n\
     if [ "$#" -eq 0 ]; then\n\
     exec python main.py interactive\n\

@@ -41,3 +41,7 @@ htmlcov/
 
 # Docker
 .env
+
+# Test
+testmanuali/
+data/

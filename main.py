@@ -135,8 +135,8 @@ def interactive():
         elif action == "settings":
             settings_menu()
         elif action == "api":
-            # Call the api() command directly
-            api()
+            # Call the start_api() command directly
+            start_api(background=True)
         elif action == "exit":
             console.print("Goodbye!")
             break

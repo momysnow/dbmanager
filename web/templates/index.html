@@ -27,72 +27,30 @@
             <a href="#" class="nav-link" data-page="backups" onclick="router.navigate('backups')">
                 <i class="fa-solid fa-clock-rotate-left"></i> Backups
             </a>
+            <a href="#" class="nav-link" data-page="schedules" onclick="router.navigate('schedules')">
+                <i class="fa-solid fa-calendar-days"></i> Schedules
+            </a>
             <a href="#" class="nav-link" data-page="s3" onclick="router.navigate('s3')">
                 <i class="fa-brands fa-aws"></i> S3 Storage
-            </a>
-            <a href="#" class="nav-link" data-page="schedules" onclick="router.navigate('schedules')">
-                <i class="fa-regular fa-calendar"></i> Schedules
             </a>
             <a href="#" class="nav-link" data-page="settings" onclick="router.navigate('settings')">
                 <i class="fa-solid fa-gear"></i> Settings
             </a>
+
+            <div style="margin-top: auto;">
+                <a href="#" class="nav-link"
+                    onclick="localStorage.removeItem('access_token'); window.location.reload();">
+                    <i class="fa-solid fa-right-from-bracket"></i> Logout
+                </a>
+            </div>
         </nav>
 
         <!-- Main Content Area -->
         <main class="main-content" id="app">
             <!-- Dynamic Content Injected Here -->
-            <div class="header">
-                <h1 class="page-title">Dashboard</h1>
-                <div class="actions">
-                    <button class="btn btn-primary" onclick="ui.modals.addDb.open()">
-                        <i class="fa-solid fa-plus"></i> Add Database
-                    </button>
-                </div>
+            <div style="display:flex; height:100%; align-items:center; justify-content:center;">
+                <div class="spinner"></div>
             </div>
-
-            <!-- Dashboard Stats -->
-            <div class="card-grid">
-                <div class="glass-card">
-                    <div class="stat-label">Total Databases</div>
-                    <div class="stat-value" id="stats-total-db">-</div>
-                    <div class="text-success"><i class="fa-solid fa-check"></i> <span id="stats-active-db">-</span>
-                        Active</div>
-                </div>
-                <div class="glass-card">
-                    <div class="stat-label">Total Backups</div>
-                    <div class="stat-value" id="stats-total-backups">-</div>
-                    <div class="text-muted">Last 24h</div>
-                </div>
-                <div class="glass-card">
-                    <div class="stat-label">Storage Used</div>
-                    <div class="stat-value" id="stats-storage">0 GB</div>
-                    <div class="text-secondary">Local + S3</div>
-                </div>
-            </div>
-
-            <!-- Recent Activity -->
-            <h3 style="margin-top: 40px; margin-bottom: 20px;">Recent Activity</h3>
-            <div class="glass-card" style="padding: 0; overflow: hidden;">
-                <table style="width: 100%; border-collapse: collapse; text-align: left;">
-                    <thead style="background: rgba(255,255,255,0.05); color: var(--text-secondary);">
-                        <tr>
-                            <th style="padding: 16px;">Time</th>
-                            <th style="padding: 16px;">Database</th>
-                            <th style="padding: 16px;">Action</th>
-                            <th style="padding: 16px;">Status</th>
-                            <th style="padding: 16px;">Duration</th>
-                        </tr>
-                    </thead>
-                    <tbody id="activity-list">
-                        <tr>
-                            <td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">
-                                Loading activity...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
         </main>
     </div>
 
@@ -101,7 +59,7 @@
         <div class="modal">
             <h2 style="margin-top: 0;">Add Database</h2>
             <form id="add-db-form" onsubmit="api.addDatabase(event)">
-                <label>Name</label>
+                <label>Friendly Name</label>
                 <input type="text" name="name" required placeholder="My Production DB">
 
                 <label>Provider</label>
@@ -113,25 +71,47 @@
                     <option value="mongodb">MongoDB</option>
                 </select>
 
-                <label>Host</label>
-                <input type="text" name="host" required placeholder="localhost">
-
-                <label>Port</label>
-                <input type="number" name="port" required value="5432">
+                <div style="display:grid; grid-template-columns: 2fr 1fr; gap:10px;">
+                    <div>
+                        <label>Host</label>
+                        <input type="text" name="host" required placeholder="localhost">
+                    </div>
+                    <div>
+                        <label>Port</label>
+                        <input type="number" name="port" required value="5432">
+                    </div>
+                </div>
 
                 <label>Database Name</label>
-                <input type="text" name="database" required>
+                <input type="text" name="database" required placeholder="mydb">
 
                 <label>User</label>
-                <input type="text" name="user" required>
+                <input type="text" name="user" required placeholder="postgres">
 
                 <label>Password</label>
                 <input type="password" name="password" required>
 
+                <div style="margin: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">
+                    <label style="color:var(--primary); margin-bottom:10px; display:block;">Backup Settings</label>
+
+                    <label>Local Retention (Count)</label>
+                    <input type="number" name="retention" value="7" placeholder="0 = infinite">
+
+                    <div style="display:flex; align-items:center; gap:10px; margin-top:15px;">
+                        <input type="checkbox" name="s3_enabled" style="width:auto; margin:0;">
+                        <label style="margin:0;">Enable S3 Upload</label>
+                    </div>
+
+                    <label style="margin-top:10px;">S3 Bucket</label>
+                    <select name="s3_bucket_id">
+                        <option value="">Select Bucket...</option>
+                    </select>
+                </div>
+
                 <div style="display: flex; gap: 10px; margin-top: 20px;">
                     <button type="button" class="btn" style="background: rgba(255,255,255,0.1);"
                         onclick="ui.modals.addDb.close()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Database</button>
+                    <button type="submit" class="btn btn-primary">Add Database</button>
                 </div>
             </form>
         </div>
@@ -148,7 +128,8 @@
                 </div>
                 <div style="background: rgba(255,255,255,0.1); height: 8px; border-radius: 4px; overflow: hidden;">
                     <div id="task-bar"
-                        style="background: var(--primary); width: 0%; height: 100%; transition: width 0.3s;"></div>
+                        style="background: var(--primary); width: 0%; height: 100%; transition: width 0.3s; transition-timing-function: linear;">
+                    </div>
                 </div>
                 <div id="task-message" style="margin-top: 10px; color: var(--text-secondary); font-size: 14px;">
                     Waiting for server...

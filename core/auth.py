@@ -6,7 +6,7 @@ from config import ConfigManager
 
 class AuthManager:
     # Hash context
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
     
     # Token settings
     ALGORITHM = "HS256"
@@ -35,7 +35,10 @@ class AuthManager:
             import secrets
             secret = secrets.token_urlsafe(32)
             # Save to config
-            self.config_manager.update_config("auth", {"jwt_secret": secret})
+            if "auth" not in self.config_manager.config:
+                self.config_manager.config["auth"] = {}
+            self.config_manager.config["auth"]["jwt_secret"] = secret
+            self.config_manager.save_config()
         
         return secret
 
@@ -77,11 +80,11 @@ class AuthManager:
             # We need to add 'users' list to config structure if not handled by generic update
             # ConfigManager needs to support list updates or keys
             # Let's assume we can update "users" key directly
-            current = self.config_manager.config.copy()
-            current["users"] = [user]
-            self.config_manager.save_config() # This saves the WHOLE config, assumes config_manager has this publicly or we update via update_config if it supports top level
-            # Update via public method preferred if available
-            self.config_manager.update_config("users", [user])
+            # Update via direct config modification
+            if "users" not in self.config_manager.config:
+                self.config_manager.config["users"] = []
+            self.config_manager.config["users"].append(user)
+            self.config_manager.save_config()
             return True
         return False
 
