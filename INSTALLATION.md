@@ -97,7 +97,7 @@ All Python dependencies are in `requirements.txt`:
 - **Core**: typer, InquirerPy, rich, pydantic
 - **Database drivers**: psycopg2-binary, pymysql, pymssql, pymongo
 - **Cloud**: boto3
-- **API**: fastapi, uvicorn, websockets
+- **API**: fastapi, uvicorn
 - **Utilities**: requests, zstandard
 
 ## Production Deployment

@@ -10,8 +10,6 @@ structlog
 fastapi
 uvicorn[standard]
 python-multipart
-websockets
-jinja2
 # requests is often needed for client calls/notifications
 requests
 

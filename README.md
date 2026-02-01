@@ -36,7 +36,6 @@ python main.py interactive
 
 ### API
 - 🌐 **REST API** - FastAPI with OpenAPI docs
-- 🔌 **WebSockets** - Real-time progress tracking
 - 🎯 **Background Tasks** - Async backup/restore
 - 📡 **Service Mode** - Daemon API server
 
@@ -69,7 +68,6 @@ python main.py interactive
 ┌─────────────────────────────────────────┐
 │      REST API (FastAPI, optional)       │
 │  - Endpoints for all operations         │
-│  - WebSocket progress tracking          │
 │  - Background task manager              │
 └─────────────────────────────────────────┘
 ```
@@ -83,7 +81,7 @@ python main.py interactive
 
 - **Python 3.10+**
 - **CLI**: Typer, InquirerPy, Rich
-- **API**: FastAPI, Uvicorn, WebSockets
+- **API**: FastAPI, Uvicorn
 - **Database Drivers**: psycopg2, pymysql, pymssql, pymongo
 - **Cloud**: boto3 (S3)
 - **Compression**: zstandard
