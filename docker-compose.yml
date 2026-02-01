@@ -10,6 +10,11 @@ services:
       - "8000:8000"
     environment:
       - DBMANAGER_DATA_DIR=/app/data
+      - DBMANAGER_CREATE_ADMIN=${DBMANAGER_CREATE_ADMIN:-true}
+      - DBMANAGER_ADMIN_USER=${DBMANAGER_ADMIN_USER:-admin}
+      - DBMANAGER_ADMIN_PASSWORD=${DBMANAGER_ADMIN_PASSWORD:-admin}
+      - DBMANAGER_JWT_SECRET=${DBMANAGER_JWT_SECRET:-}
+      - DBMANAGER_MASTER_KEY=${DBMANAGER_MASTER_KEY:-}
     # Enable TTY for interactive mode
     tty: true
     stdin_open: true
