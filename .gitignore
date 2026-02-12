@@ -8,6 +8,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.conda/
 
 # IDE
 .vscode/
@@ -38,6 +39,12 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# pre-commit
+.pre-commit-cache/
+
+# mypy
+.mypy_cache/
 
 # Docker
 .env

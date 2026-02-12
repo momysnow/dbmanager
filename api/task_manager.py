@@ -1,23 +1,24 @@
 """Task manager for tracking background operations"""
 
+from threading import Lock
 import uuid
 from datetime import datetime
-from typing import Dict, Optional, Callable
-from threading import Lock
+from typing import Any, Dict, Optional
+
 from core.progress import BackupProgress, ProgressStatus
 
 
 class TaskManager:
     """Manages background tasks and their status"""
-    
-    def __init__(self):
-        self.tasks: Dict[str, dict] = {}
+
+    def __init__(self) -> None:
+        self.tasks: Dict[str, Dict[str, Any]] = {}
         self._lock = Lock()
-    
+
     def create_task(self, task_type: str, description: str) -> str:
         """Create a new task and return its ID"""
         task_id = str(uuid.uuid4())
-        
+
         with self._lock:
             self.tasks[task_id] = {
                 "id": task_id,
@@ -30,48 +31,48 @@ class TaskManager:
                 "updated_at": datetime.now().isoformat(),
                 "completed_at": None,
                 "error": None,
-                "result": None
+                "result": None,
             }
-        
+
         return task_id
-    
-    def get_task(self, task_id: str) -> Optional[dict]:
+
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get task status"""
         with self._lock:
             return self.tasks.get(task_id)
-    
-    def update_task(self, task_id: str, **kwargs):
+
+    def update_task(self, task_id: str, **kwargs: Any) -> None:
         """Update task fields"""
         with self._lock:
             if task_id in self.tasks:
                 self.tasks[task_id].update(kwargs)
                 self.tasks[task_id]["updated_at"] = datetime.now().isoformat()
-    
-    def update_from_progress(self, task_id: str, progress: BackupProgress):
+
+    def update_from_progress(self, task_id: str, progress: BackupProgress) -> None:
         """Update task from BackupProgress object"""
         status_map = {
             ProgressStatus.IDLE: "pending",
             ProgressStatus.PREPARING: "running",
             ProgressStatus.RUNNING: "running",
             ProgressStatus.COMPLETED: "completed",
-            ProgressStatus.FAILED: "failed"
+            ProgressStatus.FAILED: "failed",
         }
-        
+
         update_data = {
             "status": status_map.get(progress.status, "pending"),
             "progress": progress.percentage,
             "message": progress.message,
-            "error": progress.error
+            "error": progress.error,
         }
-        
+
         if progress.status == ProgressStatus.COMPLETED:
             update_data["completed_at"] = datetime.now().isoformat()
         elif progress.status == ProgressStatus.FAILED:
             update_data["completed_at"] = datetime.now().isoformat()
-        
+
         self.update_task(task_id, **update_data)
-    
-    def complete_task(self, task_id: str, result: any = None):
+
+    def complete_task(self, task_id: str, result: Any = None) -> None:
         """Mark task as completed"""
         self.update_task(
             task_id,
@@ -79,35 +80,35 @@ class TaskManager:
             progress=100,
             message="Task completed successfully",
             completed_at=datetime.now().isoformat(),
-            result=result
+            result=result,
         )
-    
-    def fail_task(self, task_id: str, error: str):
+
+    def fail_task(self, task_id: str, error: str) -> None:
         """Mark task as failed"""
         self.update_task(
             task_id,
             status="failed",
             message=f"Task failed: {error}",
             error=error,
-            completed_at=datetime.now().isoformat()
+            completed_at=datetime.now().isoformat(),
         )
-    
-    def cleanup_old_tasks(self, max_age_hours: int = 24):
+
+    def cleanup_old_tasks(self, max_age_hours: int = 24) -> int:
         """Remove tasks older than max_age_hours"""
         from datetime import timedelta
-        
+
         cutoff = datetime.now() - timedelta(hours=max_age_hours)
-        
+
         with self._lock:
             to_remove = []
             for task_id, task in self.tasks.items():
                 created = datetime.fromisoformat(task["created_at"])
                 if created < cutoff and task["status"] in ["completed", "failed"]:
                     to_remove.append(task_id)
-            
+
             for task_id in to_remove:
                 del self.tasks[task_id]
-        
+
         return len(to_remove)
 
 

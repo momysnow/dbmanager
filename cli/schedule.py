@@ -1,38 +1,57 @@
 """Scheduling menus and wizards"""
+
+from typing import Any, Dict, Optional
+
 from rich.table import Table
 from InquirerPy.base.control import Choice
 from InquirerPy.separator import Separator
 
 from cli import console, manager, cron_manager
 from utils.ui import (
-    print_header, get_input, print_success, print_error, 
-    print_info, get_selection, get_confirm
+    print_header,
+    get_input,
+    print_success,
+    print_error,
+    print_info,
+    get_selection,
+    get_confirm,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SCHEDULING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def schedule_menu():
+
+def _job_label(job: Dict[str, Any]) -> str:
+    status = "Enabled" if job.get("enabled") else "Disabled"
+    return f"DB {job['id']} | {job['schedule']} | {status}"
+
+
+def schedule_menu() -> None:
     while True:
         print_header()
         console.print("\n[bold cyan]═══ Scheduling ═══[/bold cyan]\n")
-        
-        choices = [
+
+        choices: list[Any] = [
             Choice("add", "Schedule New Backup"),
             Choice("list", "List Scheduled Jobs"),
             Choice("manage", "Manage Scheduled Jobs"),
             Separator(),
-            Choice("back", "Back to Main Menu")
+            Choice("back", "Back to Main Menu"),
         ]
         action = get_selection("Scheduling Menu", choices)
-        
-        if action == "back": break
-        elif action == "add": schedule_wizard()
-        elif action == "list": list_jobs_wizard()
-        elif action == "manage": manage_jobs_wizard()
 
-def list_jobs_wizard():
+        if action == "back":
+            break
+        elif action == "add":
+            schedule_wizard()
+        elif action == "list":
+            list_jobs_wizard()
+        elif action == "manage":
+            manage_jobs_wizard()
+
+
+def list_jobs_wizard() -> None:
     jobs = cron_manager.list_jobs()
     if not jobs:
         print_info("No active scheduled jobs.")
@@ -42,12 +61,14 @@ def list_jobs_wizard():
         table.add_column("Schedule", style="magenta")
         table.add_column("Status", style="green")
         for job in jobs:
-            table.add_row(job["id"], job["schedule"], "Enabled" if job["enabled"] else "Disabled")
+            table.add_row(
+                job["id"], job["schedule"], "Enabled" if job["enabled"] else "Disabled"
+            )
         console.print(table)
     get_input("Press Enter...")
 
 
-def manage_jobs_wizard():
+def manage_jobs_wizard() -> None:
     jobs = cron_manager.list_jobs()
     if not jobs:
         print_info("No scheduled jobs to manage.")
@@ -60,10 +81,7 @@ def manage_jobs_wizard():
     choices = [
         Choice(value="back", name="← Back"),
         Separator(),
-    ] + [
-        Choice(value=job["id"], name=f"DB {job['id']} | {job['schedule']} | {'Enabled' if job['enabled'] else 'Disabled'}")
-        for job in jobs
-    ]
+    ] + [Choice(value=job["id"], name=_job_label(job)) for job in jobs]
 
     selected = get_selection("Select Job", choices)
     if selected == "back":
@@ -80,7 +98,7 @@ def manage_jobs_wizard():
         Choice(value="toggle", name="Enable/Disable"),
         Choice(value="delete", name="Delete Job"),
         Separator(),
-        Choice(value="back", name="← Back")
+        Choice(value="back", name="← Back"),
     ]
     action = get_selection("Job Actions", actions)
     if action == "back":
@@ -110,24 +128,26 @@ def manage_jobs_wizard():
             print_success("Job deleted")
         get_input("Press Enter...")
 
-def schedule_wizard():
+
+def schedule_wizard() -> None:
     dbs = manager.list_databases()
     if not dbs:
         print_info("No databases to schedule.")
         get_input("Press Enter...")
         return
-        
-    choices = [Choice(db['id'], db['name']) for db in dbs]
+
+    choices: list[Any] = [Choice(db["id"], db["name"]) for db in dbs]
     choices.append(Separator())
     choices.append(Choice("back", "Back"))
-    
+
     db_id = get_selection("Select Database to Schedule", choices)
-    if db_id == "back": return
+    if db_id == "back":
+        return
 
     schedule = _prompt_schedule()
     if not schedule:
         return
-    
+
     try:
         cron_manager.add_backup_job(int(db_id), schedule)
         print_success("Schedule updated.")
@@ -137,12 +157,12 @@ def schedule_wizard():
         get_input("Press Enter...")
 
 
-def _prompt_schedule(default: str = "0 0 * * *"):
+def _prompt_schedule(default: str = "0 0 * * *") -> Optional[str]:
     mode_choices = [
         Choice("simple", "Simple schedule (recommended)"),
         Choice("preset", "Preset cron"),
         Choice("custom", "Custom cron"),
-        Choice("back", "← Back")
+        Choice("back", "← Back"),
     ]
     mode = get_selection("Schedule Type", mode_choices)
     if mode == "back":
@@ -155,7 +175,7 @@ def _prompt_schedule(default: str = "0 0 * * *"):
         print_info("Cron Format: * * * * * (min hour day month day_of_week)")
         return get_input("Enter Cron Schedule:", default)
 
-    presets = [
+    presets: list[Any] = [
         Choice("back", "← Back"),
         Separator(),
         Choice("0 0 * * *", "Daily @ Midnight"),
@@ -163,7 +183,7 @@ def _prompt_schedule(default: str = "0 0 * * *"):
         Choice("0 * * * *", "Hourly"),
         Choice("0 */6 * * *", "Every 6 Hours"),
         Separator(),
-        Choice("custom", "Custom Schedule")
+        Choice("custom", "Custom Schedule"),
     ]
 
     selected_schedule = get_selection("Select Schedule Preset", presets)
@@ -175,7 +195,7 @@ def _prompt_schedule(default: str = "0 0 * * *"):
     return get_input("Confirm/Edit Schedule:", default=selected_schedule)
 
 
-def _simple_schedule_builder():
+def _simple_schedule_builder() -> Optional[str]:
     console.print("\n[bold]Simple schedule builder[/bold]")
     console.print("Choose frequency and time; we will build the cron expression.")
 
@@ -184,16 +204,16 @@ def _simple_schedule_builder():
         Choice("weekly", "Weekly"),
         Choice("monthly", "Monthly"),
         Choice("hourly", "Every N hours"),
-        Choice("back", "← Back")
+        Choice("back", "← Back"),
     ]
     frequency = get_selection("Frequency", freq_choices)
     if frequency == "back":
         return None
 
     if frequency == "hourly":
-        hours = get_input("Every how many hours?", "6")
+        hours_text = get_input("Every how many hours?", "6")
         try:
-            hours = int(hours)
+            hours = int(hours_text)
             if hours < 1 or hours > 24:
                 raise ValueError()
         except Exception:
@@ -229,9 +249,9 @@ def _simple_schedule_builder():
         return f"{minute} {hour} * * {day}"
 
     if frequency == "monthly":
-        day = get_input("Day of month (1-28)", "1")
+        day_text = get_input("Day of month (1-28)", "1")
         try:
-            day = int(day)
+            day = int(day_text)
             if day < 1 or day > 28:
                 raise ValueError()
         except Exception:

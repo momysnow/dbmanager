@@ -1,7 +1,9 @@
 """Dashboard statistics endpoints"""
 
+from datetime import datetime
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends
-from typing import List
 
 from api.models.dashboard import (
     OverviewStats,
@@ -20,15 +22,15 @@ from utils.stats import DashboardStats
 router = APIRouter()
 
 
-def _to_iso(dt):
+def _to_iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
 
 
 @router.get("/dashboard/overview", response_model=OverviewStats)
 async def dashboard_overview(
     config_manager: ConfigManager = Depends(get_config_manager),
-    db_manager: DBManager = Depends(get_db_manager)
-):
+    db_manager: DBManager = Depends(get_db_manager),
+) -> OverviewStats:
     stats = DashboardStats(config_manager, db_manager)
     return OverviewStats(**stats.get_overview_stats())
 
@@ -36,8 +38,8 @@ async def dashboard_overview(
 @router.get("/dashboard/databases", response_model=List[DatabaseStat])
 async def dashboard_databases(
     config_manager: ConfigManager = Depends(get_config_manager),
-    db_manager: DBManager = Depends(get_db_manager)
-):
+    db_manager: DBManager = Depends(get_db_manager),
+) -> List[DatabaseStat]:
     stats = DashboardStats(config_manager, db_manager)
     data = []
     for item in stats.get_database_stats():
@@ -51,8 +53,8 @@ async def dashboard_databases(
 async def dashboard_recent_activity(
     days: int = 7,
     config_manager: ConfigManager = Depends(get_config_manager),
-    db_manager: DBManager = Depends(get_db_manager)
-):
+    db_manager: DBManager = Depends(get_db_manager),
+) -> RecentActivity:
     stats = DashboardStats(config_manager, db_manager)
     data = stats.get_recent_activity(days=days)
     recent = [
@@ -74,8 +76,8 @@ async def dashboard_recent_activity(
 @router.get("/dashboard/storage", response_model=StorageBreakdown)
 async def dashboard_storage(
     config_manager: ConfigManager = Depends(get_config_manager),
-    db_manager: DBManager = Depends(get_db_manager)
-):
+    db_manager: DBManager = Depends(get_db_manager),
+) -> StorageBreakdown:
     stats = DashboardStats(config_manager, db_manager)
     data = stats.get_storage_breakdown()
     breakdown = [StorageBreakdownItem(**item) for item in data.get("breakdown", [])]
@@ -89,7 +91,7 @@ async def dashboard_storage(
 @router.get("/dashboard/health", response_model=HealthStatus)
 async def dashboard_health(
     config_manager: ConfigManager = Depends(get_config_manager),
-    db_manager: DBManager = Depends(get_db_manager)
-):
+    db_manager: DBManager = Depends(get_db_manager),
+) -> HealthStatus:
     stats = DashboardStats(config_manager, db_manager)
     return HealthStatus(**stats.get_health_status())

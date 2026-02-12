@@ -21,6 +21,7 @@ python main.py interactive
 ## ✨ Features
 
 ### Core
+
 - 🔄 **Backup & Restore** - All major databases
 - ☁️ **S3 Storage** - AWS, Cloudflare R2, MinIO
 - 🗜️ **Compression** - gzip, zstandard (configurable levels)
@@ -29,17 +30,20 @@ python main.py interactive
 - 🔁 **Config Sync** - S3-based configuration backup
 
 ### Automation
+
 - ⏰ **Scheduling** - Cron-based automatic backups
 - 🔔 **Notifications** - Email, Slack, Teams, Discord
 - 📊 **Dashboard** - CLI statistics and health monitoring
 - 📝 **Structured Logging** - Rotating logs with JSON support
 
 ### API
+
 - 🌐 **REST API** - FastAPI with OpenAPI docs
 - 🎯 **Background Tasks** - Async backup/restore
 - 📡 **Service Mode** - Daemon API server
 
 ### Management
+
 - 📤 **Export/Import** - Configuration backup/restore
 - 💾 **Retention** - Local and S3 cleanup policies
 - 🏥 **Health Checks** - System status monitoring
@@ -87,9 +91,44 @@ python main.py interactive
 - **Compression**: zstandard
 - **Encryption**: cryptography
 
+## ✅ Code Quality
+
+Install dev tools:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Run checks:
+
+```bash
+black .
+flake8 .
+mypy .
+```
+
+Docstring warnings (non-blocking, Google style):
+
+```bash
+flake8 --select D --exit-zero
+```
+
+Pre-commit:
+
+```bash
+pre-commit run --all-files
+```
+
+### Tools Explained
+
+- **Black**: The uncompromising Python code formatter. It enforces a consistent clicking style.
+- **Flake8**: A wrapper around `PyFlakes`, `pycodestyle`, and `Ned Batchelder's McCabe script`. It checks for style guide enforcement (PEP8) and programming errors.
+- **Mypy**: A static type checker for Python. It acts as a linter that checks for type errors using Python 3 type hints.
+
 ## 🐳 Docker
 
 All database tools pre-installed:
+
 - PostgreSQL 18 client
 - MySQL/MariaDB client
 - SQL Server tools (mssql-tools18)
@@ -99,13 +138,13 @@ All database tools pre-installed:
 
 You can configure the API auth and encryption via environment variables (recommended for Docker).
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| DBMANAGER_CREATE_ADMIN | Create admin user on first run | true |
-| DBMANAGER_ADMIN_USER | Initial admin username | admin |
-| DBMANAGER_ADMIN_PASSWORD | Initial admin password | admin |
-| DBMANAGER_JWT_SECRET | JWT secret for API tokens | (generated) |
-| DBMANAGER_MASTER_KEY | Master key for config encryption (Fernet) | (generated) |
+| Variable                 | Description                               | Default     |
+| ------------------------ | ----------------------------------------- | ----------- |
+| DBMANAGER_CREATE_ADMIN   | Create admin user on first run            | true        |
+| DBMANAGER_ADMIN_USER     | Initial admin username                    | admin       |
+| DBMANAGER_ADMIN_PASSWORD | Initial admin password                    | admin       |
+| DBMANAGER_JWT_SECRET     | JWT secret for API tokens                 | (generated) |
+| DBMANAGER_MASTER_KEY     | Master key for config encryption (Fernet) | (generated) |
 
 Copy .env.example and edit values:
 
@@ -133,6 +172,7 @@ Config stored in: `~/.dbmanager/config.json`
 ## 🎯 Usage Examples
 
 ### CLI
+
 ```bash
 # Interactive menu
 python main.py interactive
@@ -145,6 +185,7 @@ python main.py status-api
 ```
 
 ### API
+
 ```bash
 # Start API
 docker compose up -d

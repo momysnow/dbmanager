@@ -6,6 +6,7 @@ from typing import Optional
 
 class S3BucketCreate(BaseModel):
     """Model for creating S3 bucket configuration"""
+
     name: str = Field(..., description="Bucket name/identifier")
     provider: str = Field(..., description="S3 provider (aws, cloudflare, minio)")
     endpoint_url: Optional[str] = Field(default=None, description="S3 endpoint URL")
@@ -17,6 +18,7 @@ class S3BucketCreate(BaseModel):
 
 class S3BucketUpdate(BaseModel):
     """Model for updating S3 bucket configuration"""
+
     name: Optional[str] = None
     provider: Optional[str] = None
     endpoint_url: Optional[str] = None
@@ -28,6 +30,7 @@ class S3BucketUpdate(BaseModel):
 
 class S3BucketResponse(BaseModel):
     """Model for S3 bucket configuration response"""
+
     id: int
     name: str
     provider: str
@@ -39,6 +42,7 @@ class S3BucketResponse(BaseModel):
 
 class S3TestResult(BaseModel):
     """Model for S3 connection test result"""
+
     success: bool
     message: str
     error: Optional[str] = None

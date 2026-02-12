@@ -1,5 +1,7 @@
 """Notification settings endpoints"""
 
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from api.models.notifications import (
@@ -18,7 +20,7 @@ from core.notifications import NotificationManager, NotificationType
 router = APIRouter()
 
 
-def _email_response(settings: dict) -> EmailNotificationSettingsResponse:
+def _email_response(settings: Dict[str, Any]) -> EmailNotificationSettingsResponse:
     return EmailNotificationSettingsResponse(
         enabled=settings.get("enabled", False),
         smtp_host=settings.get("smtp_host", ""),
@@ -30,7 +32,7 @@ def _email_response(settings: dict) -> EmailNotificationSettingsResponse:
     )
 
 
-def _webhook_response(settings: dict) -> WebhookNotificationSettingsResponse:
+def _webhook_response(settings: Dict[str, Any]) -> WebhookNotificationSettingsResponse:
     return WebhookNotificationSettingsResponse(
         enabled=settings.get("enabled", False),
         webhook_url_set=bool(settings.get("webhook_url")),
@@ -39,8 +41,8 @@ def _webhook_response(settings: dict) -> WebhookNotificationSettingsResponse:
 
 @router.get("/notifications", response_model=NotificationsResponse)
 async def get_notifications(
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
+    config_manager: ConfigManager = Depends(get_config_manager),
+) -> NotificationsResponse:
     """Get notification settings (secrets excluded)"""
     notifications = config_manager.get_notification_settings()
 
@@ -54,8 +56,8 @@ async def get_notifications(
 
 @router.get("/notifications/email", response_model=EmailNotificationSettingsResponse)
 async def get_email_notifications(
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
+    config_manager: ConfigManager = Depends(get_config_manager),
+) -> EmailNotificationSettingsResponse:
     """Get email notification settings"""
     return _email_response(config_manager.get_notification_settings("email"))
 
@@ -63,8 +65,8 @@ async def get_email_notifications(
 @router.put("/notifications/email", response_model=EmailNotificationSettingsResponse)
 async def update_email_notifications(
     settings: EmailNotificationSettings,
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
+    config_manager: ConfigManager = Depends(get_config_manager),
+) -> EmailNotificationSettingsResponse:
     """Update email notification settings"""
     current = config_manager.get_notification_settings("email")
 
@@ -78,11 +80,12 @@ async def update_email_notifications(
     return _email_response(updated)
 
 
-@router.get("/notifications/{provider}", response_model=WebhookNotificationSettingsResponse)
+@router.get(
+    "/notifications/{provider}", response_model=WebhookNotificationSettingsResponse
+)
 async def get_webhook_notifications(
-    provider: str,
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
+    provider: str, config_manager: ConfigManager = Depends(get_config_manager)
+) -> WebhookNotificationSettingsResponse:
     """Get webhook notification settings for provider"""
     if provider not in {"slack", "teams", "discord"}:
         raise HTTPException(status_code=400, detail="Invalid provider")
@@ -90,12 +93,14 @@ async def get_webhook_notifications(
     return _webhook_response(config_manager.get_notification_settings(provider))
 
 
-@router.put("/notifications/{provider}", response_model=WebhookNotificationSettingsResponse)
+@router.put(
+    "/notifications/{provider}", response_model=WebhookNotificationSettingsResponse
+)
 async def update_webhook_notifications(
     provider: str,
     settings: WebhookNotificationSettings,
-    config_manager: ConfigManager = Depends(get_config_manager)
-):
+    config_manager: ConfigManager = Depends(get_config_manager),
+) -> WebhookNotificationSettingsResponse:
     """Update webhook notification settings for provider"""
     if provider not in {"slack", "teams", "discord"}:
         raise HTTPException(status_code=400, detail="Invalid provider")
@@ -112,8 +117,8 @@ async def update_webhook_notifications(
 
 @router.post("/notifications/test", response_model=NotificationTestResponse)
 async def test_notifications(
-    db_manager: DBManager = Depends(get_db_manager)
-):
+    db_manager: DBManager = Depends(get_db_manager),
+) -> NotificationTestResponse:
     """Send test notification to all enabled channels"""
     notif_manager = NotificationManager(db_manager.config_manager.config)
     success = notif_manager.send(

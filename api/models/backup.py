@@ -1,17 +1,19 @@
 """Backup-related Pydantic models"""
 
-from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 class BackupRequest(BaseModel):
     """Model for initiating a backup"""
+
     database_id: int = Field(..., description="Database ID to backup")
 
 
 class RestoreRequest(BaseModel):
     """Model for initiating a restore"""
+
     database_id: int = Field(..., description="Database ID to restore to")
     backup_file: str = Field(..., description="Path to backup file")
     location: str = Field("local", description="Location of backup (local/s3)")
@@ -19,11 +21,13 @@ class RestoreRequest(BaseModel):
 
 class BackupSyncRequest(BaseModel):
     """Model for syncing backups between local and S3"""
+
     action: str = Field("full", description="Sync action: upload, download, full")
 
 
 class BackupSyncResult(BaseModel):
     """Model for sync result"""
+
     uploaded: int
     downloaded: int
     local_only: int
@@ -32,6 +36,7 @@ class BackupSyncResult(BaseModel):
 
 class TaskResponse(BaseModel):
     """Model for task creation response"""
+
     task_id: str
     status: str
     message: str
@@ -39,6 +44,7 @@ class TaskResponse(BaseModel):
 
 class TaskStatus(BaseModel):
     """Model for task status"""
+
     id: str
     type: str
     description: str
@@ -54,6 +60,7 @@ class TaskStatus(BaseModel):
 
 class BackupInfo(BaseModel):
     """Model for backup file information"""
+
     path: str
     filename: str
     size_mb: float

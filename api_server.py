@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 """DBManager API Server Daemon"""
 
-import uvicorn
+import os
 import signal
 import sys
 from pathlib import Path
+from types import FrameType
+from typing import Optional
+
+import uvicorn
 
 # PID file for daemon management
 PID_FILE = Path.home() / ".dbmanager" / "api.pid"
 
 
-def write_pid():
+def write_pid() -> None:
     """Write process ID to file"""
     PID_FILE.parent.mkdir(exist_ok=True)
-    with open(PID_FILE, 'w') as f:
+    with open(PID_FILE, "w") as f:
         f.write(str(os.getpid()))
 
 
-def remove_pid():
+def remove_pid() -> None:
     """Remove PID file"""
     if PID_FILE.exists():
         PID_FILE.unlink()
 
 
-def signal_handler(sig, frame):
+def signal_handler(sig: int, frame: Optional[FrameType]) -> None:
     """Handle shutdown signals"""
     print("\n🛑 Shutting down API server...")
     remove_pid()
@@ -31,22 +35,20 @@ def signal_handler(sig, frame):
 
 
 if __name__ == "__main__":
-    import os
-    
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # Write PID
     write_pid()
-    
+
     print("🚀 Starting DBManager API Server...")
     print(f"📍 PID: {os.getpid()}")
-    print(f"🌐 Server: http://0.0.0.0:8000")
-    print(f"📚 Docs: http://localhost:8000/docs")
+    print("🌐 Server: http://0.0.0.0:8000")
+    print("📚 Docs: http://localhost:8000/docs")
     print(f"💾 PID file: {PID_FILE}")
     print("\nPress Ctrl+C to stop\n")
-    
+
     try:
         uvicorn.run(
             "api.main:app",
@@ -54,7 +56,7 @@ if __name__ == "__main__":
             port=8000,
             reload=False,  # Disabled for daemon mode
             log_level="info",
-            access_log=True
+            access_log=True,
         )
     finally:
         remove_pid()
