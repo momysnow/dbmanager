@@ -1,10 +1,10 @@
 services:
-  app:
-    build: .
-    container_name: dbmanager
+  backend:
+    build: ./backend
+    container_name: dbmanager-backend
     volumes:
-      - .:/app
-      - ./data:/app/data
+      - ./backend:/app
+      - ./backend/data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock # Docker API access
     ports:
       - "8000:8000"
@@ -15,7 +15,34 @@ services:
       - DBMANAGER_ADMIN_PASSWORD=${DBMANAGER_ADMIN_PASSWORD:-admin}
       - DBMANAGER_JWT_SECRET=${DBMANAGER_JWT_SECRET:-}
       - DBMANAGER_MASTER_KEY=${DBMANAGER_MASTER_KEY:-}
-    # Enable TTY for interactive mode
-    tty: true
-    stdin_open: true
+      - DBMANAGER_ENABLE_CLI=${DBMANAGER_ENABLE_CLI:-false}
+      # CORS: comma-separated list of allowed origins (leave empty for localhost defaults)
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: dbmanager-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - VITE_API_URL=http://backend:8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
