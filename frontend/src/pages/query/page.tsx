@@ -261,8 +261,8 @@ export default function QueryPage() {
               </TabsList>
             </div>
 
-            <div className="flex-1 relative flex flex-col overflow-hidden">
-              <TabsContent value="sql" className="mt-0 h-full flex flex-col m-0 p-0 border-0 outline-none flex-1 data-[state=active]:flex">
+            <div className="flex-1 relative overflow-hidden">
+              <TabsContent value="sql" className="absolute inset-0 mt-0 flex flex-col m-0 p-0 border-0 outline-none data-[state=inactive]:hidden">
                 {/* Query Editor */}
                 <div className="border-b bg-background">
                   <div className="p-4">
@@ -359,7 +359,7 @@ export default function QueryPage() {
           </div>
         </TabsContent>
         {/* Schema Graph Tab */}
-        <TabsContent value="schema" className="mt-0 h-full flex flex-col m-0 p-0 border-0 outline-none flex-1 data-[state=active]:flex">
+        <TabsContent value="schema" className="absolute inset-0 mt-0 flex flex-col m-0 p-0 border-0 outline-none data-[state=inactive]:hidden">
           {databaseId ? (
             <SchemaGraph databaseId={databaseId} />
           ) : (
@@ -370,7 +370,7 @@ export default function QueryPage() {
         </TabsContent>
 
         {/* Data Editor Tab */}
-        <TabsContent value="data" className="mt-0 h-full flex flex-col m-0 p-0 border-0 outline-none flex-1 data-[state=active]:flex">
+        <TabsContent value="data" className="absolute inset-0 mt-0 flex flex-col m-0 p-0 border-0 outline-none data-[state=inactive]:hidden">
           {databaseId && selectedTable ? (
             <DataEditor databaseId={databaseId} tableName={selectedTable} />
           ) : (

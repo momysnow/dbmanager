@@ -61,7 +61,7 @@ const TableNode = ({ data }: { data: TableDef }) => {
               type="target"
               position={Position.Left}
               id={col.name}
-              className="w-2 h-2 !bg-muted-foreground -ml-1 border-0"
+              className="!w-px !h-px !min-w-0 !min-h-0 !opacity-0 !border-0 !bg-transparent"
             />
             
             <div className="flex items-center gap-2 text-foreground font-mono text-xs w-full">
@@ -75,7 +75,7 @@ const TableNode = ({ data }: { data: TableDef }) => {
               type="source"
               position={Position.Right}
               id={col.name}
-              className="w-2 h-2 !bg-primary -mr-1 border-0"
+              className="!w-px !h-px !min-w-0 !min-h-0 !opacity-0 !border-0 !bg-transparent"
             />
           </div>
         ))}
