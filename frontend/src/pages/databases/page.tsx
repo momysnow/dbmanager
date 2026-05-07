@@ -120,12 +120,12 @@ export function DatabasesPage() {
       setTesting(db.id)
       const res = await databasesApi.test(db.id)
       if (res.data && res.data.success === false) {
-          toast.error(`❌ Connection to "${db.name}" failed: ${res.data.error || "Unknown error"}`)
+          toast.error(`Connection to "${db.name}" failed: ${res.data.error || "Unknown error"}`)
       } else {
-          toast.success(`✅ Connection to "${db.name}" successful`)
+          toast.success(`Connection to "${db.name}" successful`)
       }
     } catch {
-      toast.error(`❌ Connection to "${db.name}" failed`)
+      toast.error(`Connection to "${db.name}" failed`)
     } finally {
       setTesting(null)
     }

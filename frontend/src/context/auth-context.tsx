@@ -9,9 +9,23 @@ import {
 import axios from "axios";
 import { TOKEN_KEY, AUTH_LOGOUT_EVENT } from "@/lib/constants";
 
+export type UserRole = "admin" | "operator" | "viewer";
+
+export interface CurrentUser {
+  id: number;
+  username: string;
+  role: UserRole;
+  is_active: boolean;
+  must_change_password: boolean;
+  last_login_at: string | null;
+}
+
 interface AuthContextType {
   accessToken: string | null;
   isAuthenticated: boolean;
+  user: CurrentUser | null;
+  role: UserRole | null;
+  hasRole: (roles: UserRole[]) => boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -22,11 +36,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(() =>
     localStorage.getItem(TOKEN_KEY),
   );
+  const [user, setUser] = useState<CurrentUser | null>(null);
 
   const isAuthenticated = !!accessToken;
+  const role = user?.role ?? null;
+
+  const hasRole = useCallback(
+    (roles: UserRole[]) => (role ? roles.includes(role) : false),
+    [role],
+  );
+
+  const fetchMe = useCallback(async (token: string) => {
+    try {
+      const res = await axios.get<CurrentUser>("/api/v1/auth/me", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setUser(res.data);
+    } catch {
+      setUser(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (accessToken) {
+      fetchMe(accessToken);
+    } else {
+      setUser(null);
+    }
+  }, [accessToken, fetchMe]);
 
   const login = useCallback(async (username: string, password: string) => {
-    // OAuth2 password grant expects form-encoded body
     const params = new URLSearchParams();
     params.append("username", username);
     params.append("password", password);
@@ -43,10 +82,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setAccessToken(null);
+    setUser(null);
   }, []);
 
-  // Listen for the custom 401 event dispatched by the axios interceptor in api.ts
-  // This avoids a full page reload and properly clears React state
   useEffect(() => {
     window.addEventListener(AUTH_LOGOUT_EVENT, logout);
     return () => window.removeEventListener(AUTH_LOGOUT_EVENT, logout);
@@ -54,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ accessToken, isAuthenticated, login, logout }}
+      value={{ accessToken, isAuthenticated, user, role, hasRole, login, logout }}
     >
       {children}
     </AuthContext.Provider>

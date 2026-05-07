@@ -5,7 +5,7 @@ import os
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from api.models.backup import (
     RestoreRequest,
@@ -14,14 +14,53 @@ from api.models.backup import (
     BackupInfo,
     BackupSyncRequest,
     BackupSyncResult,
+    BackupMetadataUpdate,
+    BackupMetadataResponse,
+    BackupVerifyRequest,
+    BackupVerifyResponse,
 )
 from api.dependencies import get_config_manager, get_db_manager
+from api.deps import get_current_user, require_role
 from api.task_manager import task_manager
 from config import ConfigManager
-from core.manager import DBManager
+from core.audit import record_audit
+from core.manager import DBManager, BACKUP_ROOT
 from core.progress import BackupProgress
+from db.models.user import User
+
+
+_ALLOWED_BACKUP_EXTS = (".sql.gz", ".dump.gz", ".tar.gz", ".sql", ".dump")
+
+
+def _resolve_local_backup(backup_file: str) -> Path:
+    """Validate that backup_file is a real file under BACKUP_ROOT.
+
+    Why: prevents path-traversal (e.g. ``../../etc/passwd``) on local backup
+    delete/restore endpoints that accept user-supplied paths.
+    """
+    if not backup_file or "\x00" in backup_file:
+        raise HTTPException(status_code=400, detail="Invalid backup_file")
+    if not backup_file.endswith(_ALLOWED_BACKUP_EXTS):
+        raise HTTPException(
+            status_code=400, detail="Backup file extension not allowed"
+        )
+    try:
+        candidate = Path(backup_file).resolve(strict=False)
+        root = BACKUP_ROOT.resolve(strict=False)
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=400, detail="Invalid backup path")
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Backup path escapes backup root"
+        )
+    return candidate
 
 router = APIRouter()
+
+_all_roles = [Depends(require_role("admin", "operator", "viewer"))]
+_admin_op = [Depends(require_role("admin", "operator"))]
 
 
 def _get_db_or_404(database_id: int, config_manager: ConfigManager) -> Dict[str, Any]:
@@ -166,12 +205,14 @@ def run_restore_from_s3_task(
                 pass
 
 
-@router.post("/databases/{database_id}/backup", response_model=TaskResponse)
+@router.post("/databases/{database_id}/backup", response_model=TaskResponse, dependencies=_admin_op)
 async def start_backup(
     database_id: int,
     background_tasks: BackgroundTasks,
+    request: Request,
     db_manager: DBManager = Depends(get_db_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    current_user: User = Depends(get_current_user),
 ) -> TaskResponse:
     """Start a backup operation"""
 
@@ -186,16 +227,28 @@ async def start_backup(
     # Start background task
     background_tasks.add_task(run_backup_task, task_id, database_id, db_manager)
 
+    await record_audit(
+        action="backup.start",
+        status="success",
+        user=current_user,
+        resource_type="database",
+        resource_id=str(database_id),
+        request=request,
+        details={"task_id": task_id, "database_name": db.get("name")},
+    )
+
     return TaskResponse(task_id=task_id, status="pending", message="Backup started")
 
 
-@router.post("/databases/{database_id}/restore", response_model=TaskResponse)
+@router.post("/databases/{database_id}/restore", response_model=TaskResponse, dependencies=_admin_op)
 async def start_restore(
     database_id: int,
     restore_request: RestoreRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db_manager: DBManager = Depends(get_db_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    current_user: User = Depends(get_current_user),
 ) -> TaskResponse:
     """Start a restore operation"""
 
@@ -208,14 +261,16 @@ async def start_restore(
             detail="Invalid location. Must be 'local' or 's3'",
         )
 
-    # Validate backup file exists for local restores
-    if restore_request.location == "local" and not os.path.exists(
-        restore_request.backup_file
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Backup file not found: {restore_request.backup_file}",
-        )
+    # Validate + sandbox backup path for local restores
+    local_backup_path: Optional[str] = None
+    if restore_request.location == "local":
+        resolved = _resolve_local_backup(restore_request.backup_file)
+        if not resolved.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Backup file not found: {restore_request.backup_file}",
+            )
+        local_backup_path = str(resolved)
 
     # Create task
     task_id = task_manager.create_task(
@@ -237,15 +292,30 @@ async def start_restore(
             run_restore_task,
             task_id,
             database_id,
-            restore_request.backup_file,
+            local_backup_path,
             db_manager,
             restore_request.skip_safety_snapshot,
         )
 
+    await record_audit(
+        action="restore.start",
+        status="success",
+        user=current_user,
+        resource_type="database",
+        resource_id=str(database_id),
+        request=request,
+        details={
+            "task_id": task_id,
+            "location": restore_request.location,
+            "backup_file": restore_request.backup_file,
+            "skip_safety_snapshot": restore_request.skip_safety_snapshot,
+        },
+    )
+
     return TaskResponse(task_id=task_id, status="pending", message="Restore started")
 
 
-@router.get("/tasks/{task_id}", response_model=TaskStatus)
+@router.get("/tasks/{task_id}", response_model=TaskStatus, dependencies=_all_roles)
 async def get_task_status(task_id: str) -> TaskStatus:
     """Get status of a background task (polling endpoint)"""
 
@@ -260,7 +330,7 @@ async def get_task_status(task_id: str) -> TaskStatus:
     return TaskStatus(**task)
 
 
-@router.get("/databases/{database_id}/backups", response_model=List[BackupInfo])
+@router.get("/databases/{database_id}/backups", response_model=List[BackupInfo], dependencies=_all_roles)
 async def list_backups(
     database_id: int,
     location: Optional[str] = None,
@@ -290,6 +360,7 @@ async def list_backups(
         # Since we don't have stored result, we could assume False or None
         # until explicitly verified. "has_checksum" is a good proxy.
 
+        meta = config_manager.get_backup_metadata(backup["filename"])
         backup_info = BackupInfo(
             path=backup["path"],
             filename=backup["filename"],
@@ -298,56 +369,52 @@ async def list_backups(
             database_id=database_id,
             has_checksum=backup.get("has_checksum", False),
             location=backup.get("location", "local"),
-            # checksum_verified could be populated if we stored verification status,
-            # but for now let's leave it as None (unknown) or check file existence?
-            # It's an optional field.
+            notes=meta.get("notes") or None,
+            starred=bool(meta.get("starred", False)),
+            date_starred=meta.get("date_starred"),
         )
         backup_list.append(backup_info)
 
     return backup_list
 
 
-@router.post("/backups/verify", response_model=dict)
+@router.post("/backups/verify", response_model=BackupVerifyResponse, dependencies=_admin_op)
 async def verify_backup(
-    # We need to accept complex object or query params.
-    # Use Body or improved Request model.
-    # To keep it simple without new model file edits for now, use dict body.
-    # Let's use simple body dict
-    payload: Dict[str, Any],
+    payload: BackupVerifyRequest,
     db_manager: DBManager = Depends(get_db_manager),
-) -> Dict[str, Any]:
+) -> BackupVerifyResponse:
     """Verify backup integrity"""
-    backup_file = payload.get("backup_file")
-    location = payload.get("location", "local")
-    database_id = payload.get("database_id")
-
-    if not backup_file:
-        raise HTTPException(status_code=400, detail="backup_file required")
+    backup_file = payload.backup_file
+    location = payload.location
+    database_id = payload.database_id
 
     if location == "s3" and not database_id:
         raise HTTPException(
             status_code=400, detail="database_id required for S3 verification"
         )
 
-    if location == "local" and not os.path.exists(backup_file):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Backup file not found: {backup_file}",
-        )
+    if location == "local":
+        resolved = _resolve_local_backup(backup_file)
+        if not resolved.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Backup file not found: {backup_file}",
+            )
+        backup_file = str(resolved)
 
     try:
         result = db_manager.verify_backup_integrity(
             backup_file, location=location, db_id=database_id
         )
-        return {
-            "file": backup_file,
-            "valid": result,
-            "message": (
+        return BackupVerifyResponse(
+            file=backup_file,
+            valid=bool(result),
+            message=(
                 "Backup integrity verified"
                 if result
                 else "Backup integrity check failed"
             ),
-        }
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -355,18 +422,21 @@ async def verify_backup(
         )
 
 
-@router.delete("/backups", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/backups", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_op)
 async def delete_backup(
     backup_file: str,
+    request: Request,
     location: str = "local",
     database_id: Optional[int] = None,
     config_manager: ConfigManager = Depends(get_config_manager),
     db_manager: DBManager = Depends(get_db_manager),
+    current_user: User = Depends(get_current_user),
 ) -> None:
     """Delete a backup file"""
 
     if location == "local":
-        if not os.path.exists(backup_file):
+        resolved = _resolve_local_backup(backup_file)
+        if not resolved.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Backup file not found: {backup_file}",
@@ -374,15 +444,33 @@ async def delete_backup(
 
         try:
             # Delete backup file
-            os.remove(backup_file)
+            resolved.unlink()
 
             # Also delete checksum if exists
-            checksum_file = f"{backup_file}.sha256"
-            if os.path.exists(checksum_file):
-                os.remove(checksum_file)
+            checksum_file = resolved.with_name(resolved.name + ".sha256")
+            if checksum_file.exists():
+                checksum_file.unlink()
 
+            await record_audit(
+                action="backup.delete",
+                status="success",
+                user=current_user,
+                resource_type="backup",
+                resource_id=str(database_id) if database_id else None,
+                request=request,
+                details={"backup_file": str(resolved), "location": "local"},
+            )
             return None
         except Exception as e:
+            await record_audit(
+                action="backup.delete",
+                status="failure",
+                user=current_user,
+                resource_type="backup",
+                resource_id=str(database_id) if database_id else None,
+                request=request,
+                details={"backup_file": str(resolved), "location": "local", "error": str(e)},
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to delete backup: {str(e)}",
@@ -419,8 +507,26 @@ async def delete_backup(
             except Exception:
                 pass
 
+            await record_audit(
+                action="backup.delete",
+                status="success",
+                user=current_user,
+                resource_type="backup",
+                resource_id=str(database_id),
+                request=request,
+                details={"backup_file": backup_file, "location": "s3"},
+            )
             return None
         except Exception as e:
+            await record_audit(
+                action="backup.delete",
+                status="failure",
+                user=current_user,
+                resource_type="backup",
+                resource_id=str(database_id),
+                request=request,
+                details={"backup_file": backup_file, "location": "s3", "error": str(e)},
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to delete S3 backup: {str(e)}",
@@ -429,7 +535,7 @@ async def delete_backup(
         raise HTTPException(status_code=400, detail="Invalid location")
 
 
-@router.post("/databases/{database_id}/backups/sync", response_model=BackupSyncResult)
+@router.post("/databases/{database_id}/backups/sync", response_model=BackupSyncResult, dependencies=_admin_op)
 async def sync_backups(
     database_id: int,
     sync_request: BackupSyncRequest,
@@ -481,4 +587,37 @@ async def sync_backups(
         downloaded=downloaded,
         local_only=len(only_local),
         s3_only=len(only_s3),
+    )
+
+
+@router.patch("/backups/metadata", response_model=BackupMetadataResponse, dependencies=_admin_op)
+async def update_backup_metadata(
+    payload: BackupMetadataUpdate,
+    config_manager: ConfigManager = Depends(get_config_manager),
+) -> BackupMetadataResponse:
+    """Set notes and/or starred status for a backup"""
+    config_manager.set_backup_metadata(
+        payload.filename, notes=payload.notes, starred=payload.starred
+    )
+    meta = config_manager.get_backup_metadata(payload.filename)
+    return BackupMetadataResponse(
+        filename=payload.filename,
+        notes=meta.get("notes", ""),
+        starred=bool(meta.get("starred", False)),
+        date_starred=meta.get("date_starred"),
+    )
+
+
+@router.get("/backups/metadata/{filename:path}", response_model=BackupMetadataResponse, dependencies=_all_roles)
+async def get_backup_metadata(
+    filename: str,
+    config_manager: ConfigManager = Depends(get_config_manager),
+) -> BackupMetadataResponse:
+    """Get metadata for a specific backup"""
+    meta = config_manager.get_backup_metadata(filename)
+    return BackupMetadataResponse(
+        filename=filename,
+        notes=meta.get("notes", ""),
+        starred=bool(meta.get("starred", False)),
+        date_starred=meta.get("date_starred"),
     )

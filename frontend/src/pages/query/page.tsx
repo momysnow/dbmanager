@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import api, { databasesApi } from "@/services/api";
+import type { DatabaseResponse } from "@/types";
 import SchemaGraph from "./components/schema-graph";
 import DataEditor from "./components/data-editor";
 
@@ -52,7 +53,7 @@ export default function QueryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialDbId = searchParams.get("dbId") ? parseInt(searchParams.get("dbId")!) : null;
   const [databaseId, setDatabaseId] = useState<number | null>(initialDbId);
-  const [allDatabases, setAllDatabases] = useState<unknown[]>([]);
+  const [allDatabases, setAllDatabases] = useState<DatabaseResponse[]>([]);
 
   const [query, setQuery] = useState("SELECT * FROM ");
   const [tables, setTables] = useState<TableInfo[]>([]);
@@ -62,32 +63,39 @@ export default function QueryPage() {
   const [loading, setLoading] = useState(false);
   const [loadingTables, setLoadingTables] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const loadDatabases = useCallback(async () => {
-    try {
-      const response = await databasesApi.getAll();
-      setAllDatabases(response.data);
-      if (response.data.length > 0 && !databaseId) {
-        setDatabaseId(response.data[0].id);
-        setSearchParams({ dbId: response.data[0].id.toString() });
-      }
-    } catch (err) {
-      console.error("Failed to load databases:", err);
-    }
-  }, [databaseId, setSearchParams]);
 
-  // Load all databases
+  // Load all databases once on mount; pick a default DB if none is in the URL.
   useEffect(() => {
-    loadDatabases();
-  }, [loadDatabases]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await databasesApi.getAll();
+        if (cancelled) return;
+        setAllDatabases(response.data);
+        setDatabaseId((current) => {
+          if (current !== null) return current;
+          if (response.data.length === 0) return null;
+          const first = response.data[0].id;
+          setSearchParams({ dbId: first.toString() });
+          return first;
+        });
+      } catch (err) {
+        console.error("Failed to load databases:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [setSearchParams]);
 
-  // Load database info and tables when db changes
+  // Load tables whenever the selected database changes.
   useEffect(() => {
     if (databaseId) {
       loadTables(databaseId);
     } else {
       setTables([]);
     }
-  }, [databaseId, allDatabases]);
+  }, [databaseId]);
 
   const handleDatabaseChange = (val: string) => {
     const id = parseInt(val);
@@ -175,13 +183,11 @@ export default function QueryPage() {
                       <SelectValue placeholder="Select a database..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {allDatabases.map((db: { id: number; name: string; provider: string } | unknown) => {
-                        const dbTyped = db as { id: number; name: string; provider: string };
-                        return (
-                        <SelectItem key={dbTyped.id} value={dbTyped.id.toString()}>
-                          {dbTyped.name} <span className="text-muted-foreground ml-1">({dbTyped.provider})</span>
+                      {allDatabases.map((db) => (
+                        <SelectItem key={db.id} value={db.id.toString()}>
+                          {db.name} <span className="text-muted-foreground ml-1">({db.provider})</span>
                         </SelectItem>
-                      )})}
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

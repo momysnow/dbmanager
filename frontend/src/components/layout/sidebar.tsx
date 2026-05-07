@@ -9,13 +9,17 @@ import {
   Settings,
   Archive,
   TerminalSquare,
+  Users,
+  ClipboardList,
 } from "lucide-react"
+import { useAuth } from "@/context/auth-context"
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
 
 export function Sidebar({ className }: SidebarProps) {
   const location = useLocation()
   const pathname = location.pathname
+  const { hasRole } = useAuth()
 
   const routes = [
     {
@@ -23,42 +27,63 @@ export function Sidebar({ className }: SidebarProps) {
       label: "Dashboard",
       icon: LayoutDashboard,
       active: pathname === "/",
+      show: true,
     },
     {
       href: "/databases",
       label: "Databases",
       icon: Database,
       active: pathname === "/databases" || pathname.startsWith("/databases/"),
+      show: true,
     },
     {
       href: "/query",
       label: "Query",
       icon: TerminalSquare,
       active: pathname.startsWith("/query"),
+      show: true,
     },
     {
       href: "/backups",
       label: "Backups",
       icon: Archive,
       active: pathname.startsWith("/backups"),
+      show: true,
     },
     {
       href: "/storage",
       label: "Storage",
       icon: HardDrive,
       active: pathname.startsWith("/storage"),
+      show: true,
     },
     {
       href: "/schedules",
       label: "Schedules",
       icon: CalendarClock,
       active: pathname.startsWith("/schedules"),
+      show: true,
     },
     {
       href: "/settings",
       label: "Settings",
       icon: Settings,
       active: pathname.startsWith("/settings"),
+      show: hasRole(["admin"]),
+    },
+    {
+      href: "/users",
+      label: "Users",
+      icon: Users,
+      active: pathname.startsWith("/users"),
+      show: hasRole(["admin"]),
+    },
+    {
+      href: "/audit",
+      label: "Audit Log",
+      icon: ClipboardList,
+      active: pathname.startsWith("/audit"),
+      show: hasRole(["admin"]),
     },
   ]
 
@@ -70,7 +95,7 @@ export function Sidebar({ className }: SidebarProps) {
             DB Manager
           </h2>
           <div className="space-y-1">
-            {routes.map((route) => (
+            {routes.filter((r) => r.show).map((route) => (
               <Button
                 key={route.href}
                 variant={route.active ? "secondary" : "ghost"}

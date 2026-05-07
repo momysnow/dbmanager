@@ -1,4 +1,4 @@
-import { Moon, Sun, LogOut } from "lucide-react"
+import { Moon, Sun, LogOut, Monitor, Check } from "lucide-react"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/context/auth-context"
 import { Button } from "@/components/ui/button"
@@ -32,15 +32,15 @@ export function Header() {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setTheme("light")}>
                 <Sun className="mr-2 h-4 w-4" /> Light
-                {theme === "light" && <span className="ml-auto text-xs">✓</span>}
+                {theme === "light" && <Check className="ml-auto h-4 w-4 text-muted-foreground" />}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setTheme("dark")}>
                 <Moon className="mr-2 h-4 w-4" /> Dark
-                {theme === "dark" && <span className="ml-auto text-xs">✓</span>}
+                {theme === "dark" && <Check className="ml-auto h-4 w-4 text-muted-foreground" />}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setTheme("system")}>
-                <span className="mr-2 h-4 w-4 flex items-center justify-center text-xs">⚙</span> System
-                {theme === "system" && <span className="ml-auto text-xs">✓</span>}
+                <Monitor className="mr-2 h-4 w-4" /> System
+                {theme === "system" && <Check className="ml-auto h-4 w-4 text-muted-foreground" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

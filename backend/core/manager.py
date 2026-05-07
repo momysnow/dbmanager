@@ -397,6 +397,9 @@ class DBManager:
         if len(backups) > keep_last:
             to_delete = backups[keep_last:]
             for b in to_delete:
+                meta = self.config_manager.get_backup_metadata(b["filename"])
+                if meta.get("starred", False):
+                    continue
                 try:
                     Path(b["path"]).unlink()
                     checksum_path = Path(f"{b['path']}.sha256")
@@ -431,6 +434,10 @@ class DBManager:
             if len(s3_backups) > keep_last:
                 to_delete = s3_backups[keep_last:]
                 for backup in to_delete:
+                    filename = backup["key"].split("/")[-1]
+                    meta = self.config_manager.get_backup_metadata(filename)
+                    if meta.get("starred", False):
+                        continue
                     try:
                         storage.delete_file(backup["key"])
                         storage.delete_file(f"{backup['key']}.sha256")
@@ -1032,18 +1039,19 @@ class DBManager:
                 password=params["password"],
                 dbname=params["database"],
             )
-            cursor = conn.cursor()
-            cursor.execute(
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT table_name, table_type
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name
                 """
-                SELECT table_name, table_type 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                ORDER BY table_name
-            """
-            )
-            tables = [{"name": row[0], "type": row[1]} for row in cursor.fetchall()]
-            conn.close()
-            return tables
+                )
+                return [{"name": row[0], "type": row[1]} for row in cursor.fetchall()]
+            finally:
+                conn.close()
 
         elif provider_type in ("mysql", "mariadb"):
             import pymysql
@@ -1055,19 +1063,20 @@ class DBManager:
                 password=params["password"],
                 database=params["database"],
             )
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT table_name, table_type 
-                FROM information_schema.tables 
-                WHERE table_schema = %s
-                ORDER BY table_name
-            """,
-                (params["database"],),
-            )
-            tables = [{"name": row[0], "type": row[1]} for row in cursor.fetchall()]
-            conn.close()
-            return tables
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT table_name, table_type
+                    FROM information_schema.tables
+                    WHERE table_schema = %s
+                    ORDER BY table_name
+                """,
+                    (params["database"],),
+                )
+                return [{"name": row[0], "type": row[1]} for row in cursor.fetchall()]
+            finally:
+                conn.close()
         else:
             raise ValueError(f"List tables not supported for provider: {provider_type}")
 
@@ -1090,27 +1099,29 @@ class DBManager:
                 password=params["password"],
                 dbname=params["database"],
             )
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT column_name, data_type, is_nullable, column_default
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = %s
-                ORDER BY ordinal_position
-            """,
-                (table_name,),
-            )
-            columns = [
-                {
-                    "name": row[0],
-                    "type": row[1],
-                    "nullable": row[2] == "YES",
-                    "default": row[3],
-                }
-                for row in cursor.fetchall()
-            ]
-            conn.close()
-            return {"table": table_name, "columns": columns}
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = %s
+                    ORDER BY ordinal_position
+                """,
+                    (table_name,),
+                )
+                columns = [
+                    {
+                        "name": row[0],
+                        "type": row[1],
+                        "nullable": row[2] == "YES",
+                        "default": row[3],
+                    }
+                    for row in cursor.fetchall()
+                ]
+                return {"table": table_name, "columns": columns}
+            finally:
+                conn.close()
 
         elif provider_type in ("mysql", "mariadb"):
             import pymysql
@@ -1122,27 +1133,29 @@ class DBManager:
                 password=params["password"],
                 database=params["database"],
             )
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT column_name, data_type, is_nullable, column_default
-                FROM information_schema.columns
-                WHERE table_schema = %s AND table_name = %s
-                ORDER BY ordinal_position
-            """,
-                (params["database"], table_name),
-            )
-            columns = [
-                {
-                    "name": row[0],
-                    "type": row[1],
-                    "nullable": row[2] == "YES",
-                    "default": row[3],
-                }
-                for row in cursor.fetchall()
-            ]
-            conn.close()
-            return {"table": table_name, "columns": columns}
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns
+                    WHERE table_schema = %s AND table_name = %s
+                    ORDER BY ordinal_position
+                """,
+                    (params["database"], table_name),
+                )
+                columns = [
+                    {
+                        "name": row[0],
+                        "type": row[1],
+                        "nullable": row[2] == "YES",
+                        "default": row[3],
+                    }
+                    for row in cursor.fetchall()
+                ]
+                return {"table": table_name, "columns": columns}
+            finally:
+                conn.close()
         else:
             raise ValueError(
                 f"Get table schema not supported for provider: {provider_type}"

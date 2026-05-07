@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
@@ -16,11 +18,13 @@ SENSITIVE_FIELDS = [
     "webhook_url",  # Often contains tokens
     "connection_string",
     "smb_password",
+    "jwt_secret",
 ]
 
 
 class ConfigManager:
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._ensure_config_exists()
         # Initialize security manager
         from core.security import SecurityManager
@@ -40,6 +44,10 @@ class ConfigManager:
                     "compression": {"enabled": False, "algorithm": "gzip", "level": 6},
                     "encryption": {"enabled": False, "password": None},
                 },
+                "schedules": [],
+                "uptime_history": {},
+                "backup_metadata": {},
+                "ping_settings": {"enabled": True, "interval_minutes": 5},
                 "notifications": {
                     "email": {
                         "enabled": False,
@@ -79,8 +87,9 @@ class ConfigManager:
             return data
 
     def _load_config(self) -> Dict[str, Any]:
-        with open(CONFIG_FILE, "r") as f:
-            data = json.load(f)
+        with self._lock:
+            with open(CONFIG_FILE, "r") as f:
+                data = json.load(f)
 
         # Decrypt loaded config so it's usable in memory
         processed = self._process_config(data, encrypt=False)
@@ -90,8 +99,9 @@ class ConfigManager:
         # Create a deep copy with encrypted values for saving
         encrypted_config = self._process_config(self.config, encrypt=True)
 
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(encrypted_config, f, indent=4)
+        with self._lock:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(encrypted_config, f, indent=4)
 
         # Auto-sync to Storage if enabled
         self._sync_to_storage()
@@ -239,4 +249,66 @@ class ConfigManager:
             self.config["notifications"][provider] = {}
 
         self.config["notifications"][provider].update(settings)
+        self.save_config()
+
+    # ── Uptime history ────────────────────────────────────────────────────────
+
+    def get_uptime_history(self, db_id: int) -> List[Dict[str, Any]]:
+        return list(self.config.get("uptime_history", {}).get(str(db_id), []))
+
+    def append_uptime_event(self, db_id: int, status: str, ts: str) -> None:
+        if "uptime_history" not in self.config:
+            self.config["uptime_history"] = {}
+        key = str(db_id)
+        history: List[Dict[str, Any]] = self.config["uptime_history"].get(key, [])
+        history.append({"ts": ts, "status": status})
+        # Prune entries older than 365 days
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
+        history = [e for e in history if e["ts"] >= cutoff]
+        self.config["uptime_history"][key] = history
+        self.save_config()
+
+    # ── Backup metadata ───────────────────────────────────────────────────────
+
+    def get_backup_metadata(self, filename: str) -> Dict[str, Any]:
+        return dict(
+            self.config.get("backup_metadata", {}).get(
+                filename, {"notes": "", "starred": False}
+            )
+        )
+
+    def set_backup_metadata(
+        self,
+        filename: str,
+        notes: Optional[str] = None,
+        starred: Optional[bool] = None,
+    ) -> None:
+        if "backup_metadata" not in self.config:
+            self.config["backup_metadata"] = {}
+        entry: Dict[str, Any] = self.config["backup_metadata"].get(
+            filename, {"notes": "", "starred": False}
+        )
+        if notes is not None:
+            entry["notes"] = notes
+        if starred is not None:
+            entry["starred"] = starred
+            if starred:
+                entry["date_starred"] = datetime.now(timezone.utc).isoformat()
+            else:
+                entry.pop("date_starred", None)
+        self.config["backup_metadata"][filename] = entry
+        self.save_config()
+
+    # ── Ping settings ─────────────────────────────────────────────────────────
+
+    def get_ping_settings(self) -> Dict[str, Any]:
+        return dict(
+            self.config.get("ping_settings", {"enabled": True, "interval_minutes": 5})
+        )
+
+    def update_ping_settings(self, enabled: bool, interval_minutes: int) -> None:
+        self.config["ping_settings"] = {
+            "enabled": enabled,
+            "interval_minutes": interval_minutes,
+        }
         self.save_config()

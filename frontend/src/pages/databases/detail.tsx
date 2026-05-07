@@ -2,18 +2,20 @@ import { useEffect, useState, useCallback, useRef, useId } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft, RefreshCw, Plug, Shield, RotateCcw, Trash2,
-  ShieldCheck, Loader2, CheckCircle2, XCircle, Clock
+  ShieldCheck, Loader2, CheckCircle2, XCircle, Clock,
+  Star, FileText, X
 } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { toast } from "sonner"
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell
 } from "recharts"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle
 } from "@/components/ui/card"
@@ -25,7 +27,11 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { databasesApi, backupsApi } from "@/services/api"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose
+} from "@/components/ui/dialog"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { databasesApi, backupsApi, backupMetadataApi } from "@/services/api"
 import type { DatabaseResponse } from "@/types"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -36,9 +42,24 @@ interface BackupInfo {
   date: string
   has_checksum: boolean
   location: "local" | "s3"
+  starred?: boolean
+  notes?: string | null
+  date_starred?: string | null
+}
+
+interface UptimeDataPoint {
+  ts: string
+  status: "up" | "down"
+}
+
+interface UptimeData {
+  uptime_pct: number
+  period: string
+  datapoints: UptimeDataPoint[]
 }
 
 type ConnectionStatus = "unknown" | "checking" | "ok" | "error"
+type UptimePeriod = "day" | "week" | "month" | "year"
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
@@ -80,6 +101,18 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   )
 }
 
+// ── Uptime tooltip ────────────────────────────────────────────────────────────
+function UptimeTooltip({ active, payload, label }: { active?: boolean; payload?: { value: number; payload: UptimeDataPoint }[]; label?: string }) {
+  if (!active || !payload?.length) return null
+  const pt = payload[0].payload
+  return (
+    <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
+      <p className="font-medium">{label}</p>
+      <p className={pt.status === "up" ? "text-green-400" : "text-red-400"}>{pt.status}</p>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function DatabaseDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -99,6 +132,16 @@ export function DatabaseDetailPage() {
   const [skipSafetySnapshot, setSkipSafetySnapshot] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const skipSnapshotId = useId()
+
+  // Uptime state
+  const [uptimeData, setUptimeData] = useState<UptimeData | null>(null)
+  const [uptimePeriod, setUptimePeriod] = useState<UptimePeriod>("week")
+  const [loadingUptime, setLoadingUptime] = useState(false)
+
+  // Notes dialog state
+  const [notesTarget, setNotesTarget] = useState<BackupInfo | null>(null)
+  const [notesText, setNotesText] = useState("")
+  const [savingNotes, setSavingNotes] = useState(false)
 
   // ── Fetch DB info ────────────────────────────────────────────────────────────
   const fetchDb = useCallback(async () => {
@@ -130,6 +173,19 @@ export function DatabaseDetailPage() {
     }
   }, [dbId])
 
+  // ── Fetch uptime ─────────────────────────────────────────────────────────────
+  const fetchUptime = useCallback(async (period: UptimePeriod) => {
+    setLoadingUptime(true)
+    try {
+      const res = await databasesApi.getUptime(dbId, period)
+      setUptimeData(res.data as UptimeData)
+    } catch {
+      setUptimeData(null)
+    } finally {
+      setLoadingUptime(false)
+    }
+  }, [dbId])
+
   // ── Test connection ──────────────────────────────────────────────────────────
   const checkConnection = useCallback(async () => {
     setConnStatus("checking")
@@ -149,22 +205,22 @@ export function DatabaseDetailPage() {
     fetchDb()
     fetchBackups()
     checkConnection()
-    // Poll connection every 30s
+    fetchUptime("week")
     pollRef.current = setInterval(checkConnection, 30_000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [fetchDb, fetchBackups, checkConnection])
+  }, [fetchDb, fetchBackups, checkConnection, fetchUptime])
 
   // ── Backup now ───────────────────────────────────────────────────────────────
   const handleBackupNow = async () => {
     try {
       const res = await databasesApi.backup(dbId)
       const taskId = res.data?.task_id
-      toast.info("⏳ Backup in corso...")
+      toast.info("Backup in progress…")
       if (taskId) {
-        const success = await pollTask(taskId, "✅ Backup completato con successo", "Backup fallito")
+        const success = await pollTask(taskId, "Backup completed successfully", "Backup failed")
         if (success) fetchBackups()
       } else {
-        toast.success("Backup avviato!")
+        toast.success("Backup started")
         setTimeout(fetchBackups, 3000)
       }
     } catch {
@@ -174,7 +230,7 @@ export function DatabaseDetailPage() {
 
   // ── Poll task until done ─────────────────────────────────────────────────────
   const pollTask = useCallback(async (taskId: string, successMsg: string, errorPrefix: string) => {
-    const maxAttempts = 60 // 60 * 2s = 2 min timeout
+    const maxAttempts = 60
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 2000))
       try {
@@ -185,15 +241,14 @@ export function DatabaseDetailPage() {
           return true
         }
         if (task.status === "failed") {
-          toast.error(`❌ ${errorPrefix}: ${task.error ?? task.message ?? "Errore sconosciuto"}`)
+          toast.error(`${errorPrefix}: ${task.error ?? task.message ?? "Unknown error"}`)
           return false
         }
-        // still running/pending — continue polling
       } catch {
         // ignore transient errors
       }
     }
-    toast.error(`❌ ${errorPrefix}: timeout`)
+    toast.error(`${errorPrefix}: timeout`)
     return false
   }, [])
 
@@ -206,18 +261,18 @@ export function DatabaseDetailPage() {
     setSkipSafetySnapshot(false)
     try {
       setRestoring(backup.path)
-      toast.info(`⏳ Restore in corso da ${backup.filename}…`)
+      toast.info(`Restore in progress from ${backup.filename}…`)
       const res = await databasesApi.restore(dbId, backup.path, backup.location, skip)
       const taskId = res.data?.task_id
       if (taskId) {
-        await pollTask(taskId, `✅ Restore completato da ${backup.filename}`, "Restore fallito")
+        await pollTask(taskId, `Restore completed from ${backup.filename}`, "Restore failed")
       } else {
-        toast.success(`✅ Restore avviato da ${backup.filename}`)
+        toast.success(`Restore started from ${backup.filename}`)
       }
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(`❌ Restore fallito: ${detail ?? "Errore sconosciuto"}`)
+      toast.error(`Restore failed: ${detail ?? "Unknown error"}`)
     } finally {
       setRestoring(null)
     }
@@ -245,12 +300,49 @@ export function DatabaseDetailPage() {
     try {
       setVerifying(backup.path)
       const r = await backupsApi.verify(backup.path, backup.location, dbId)
-      if (r.data.valid) toast.success(`✅ Integrity OK: ${backup.filename}`)
-      else toast.error(`❌ Integrity FAILED: ${backup.filename}`)
+      if (r.data.valid) toast.success(`Integrity OK: ${backup.filename}`)
+      else toast.error(`Integrity FAILED: ${backup.filename}`)
     } catch {
       toast.error("Verification failed")
     } finally {
       setVerifying(null)
+    }
+  }
+
+  // ── Toggle star ───────────────────────────────────────────────────────────────
+  const handleToggleStar = async (backup: BackupInfo) => {
+    const newStarred = !backup.starred
+    setBackups(prev => prev.map(b =>
+      b.path === backup.path
+        ? { ...b, starred: newStarred, notes: newStarred ? b.notes : "" }
+        : b
+    ))
+    try {
+      await backupMetadataApi.update({
+        filename: backup.filename,
+        starred: newStarred,
+        ...(newStarred ? {} : { notes: "" }),
+      })
+      toast.success(newStarred ? "Marked as favourite" : "Favourite removed")
+    } catch {
+      setBackups(prev => prev.map(b => b.path === backup.path ? { ...b, starred: !newStarred, notes: backup.notes } : b))
+      toast.error("Failed to update star")
+    }
+  }
+
+  // ── Save notes ────────────────────────────────────────────────────────────────
+  const handleSaveNotes = async () => {
+    if (!notesTarget) return
+    setSavingNotes(true)
+    try {
+      await backupMetadataApi.update({ filename: notesTarget.filename, notes: notesText })
+      setBackups(prev => prev.map(b => b.filename === notesTarget.filename ? { ...b, notes: notesText } : b))
+      toast.success("Notes saved")
+      setNotesTarget(null)
+    } catch {
+      toast.error("Failed to save notes")
+    } finally {
+      setSavingNotes(false)
     }
   }
 
@@ -261,13 +353,21 @@ export function DatabaseDetailPage() {
     return `${(mb / 1024).toFixed(2)} GB`
   }
 
-  // Chart data: last 10 backups reversed (oldest → newest)
   const chartData = [...backups].reverse().slice(-10).map(b => ({
     name: format(parseISO(b.date), "MMM d HH:mm"),
     size: parseFloat(b.size_mb.toFixed(3)),
   }))
 
   const totalSize = backups.reduce((s, b) => s + b.size_mb, 0)
+
+  // Uptime chart data
+  const uptimeChartData = (uptimeData?.datapoints ?? []).map(pt => ({
+    ts: (() => {
+      try { return format(parseISO(pt.ts), "MMM d HH:mm") } catch { return pt.ts }
+    })(),
+    value: 1,
+    status: pt.status,
+  }))
 
   // ── Render ───────────────────────────────────────────────────────────────────
   if (loadingDb) {
@@ -320,7 +420,6 @@ export function DatabaseDetailPage() {
           <Button size="sm" onClick={handleBackupNow}>
             <Shield className="mr-2 h-4 w-4" /> Backup Now
           </Button>
-
         </div>
       </div>
 
@@ -334,7 +433,8 @@ export function DatabaseDetailPage() {
           <CardContent>
             <p className="text-xs text-muted-foreground">
               {backups.filter(b => b.location === "local").length} local ·{" "}
-              {backups.filter(b => b.location === "s3").length} S3
+              {backups.filter(b => b.location === "s3").length} S3 ·{" "}
+              {backups.filter(b => b.starred).length} starred
             </p>
           </CardContent>
         </Card>
@@ -366,7 +466,74 @@ export function DatabaseDetailPage() {
         </Card>
       </div>
 
-      {/* ── Chart ── */}
+      {/* ── Uptime chart ── */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div>
+            <CardTitle>Uptime</CardTitle>
+            <CardDescription>
+              {uptimeData
+                ? `${uptimeData.uptime_pct.toFixed(1)}% uptime — ${uptimeData.datapoints.length} checks`
+                : "No data yet — checks run every 5 min"}
+            </CardDescription>
+          </div>
+          <Tabs value={uptimePeriod} onValueChange={(v) => {
+            const p = v as UptimePeriod
+            setUptimePeriod(p)
+            fetchUptime(p)
+          }}>
+            <TabsList className="h-8">
+              <TabsTrigger value="day" className="text-xs px-2">Day</TabsTrigger>
+              <TabsTrigger value="week" className="text-xs px-2">Week</TabsTrigger>
+              <TabsTrigger value="month" className="text-xs px-2">Month</TabsTrigger>
+              <TabsTrigger value="year" className="text-xs px-2">Year</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </CardHeader>
+        <CardContent>
+          {loadingUptime ? (
+            <Skeleton className="h-24 w-full" />
+          ) : uptimeChartData.length === 0 ? (
+            <div className="h-24 flex items-center justify-center text-sm text-muted-foreground">
+              No uptime data for selected period
+            </div>
+          ) : (
+            <>
+              <div className="mb-2 flex items-center gap-2">
+                <span className={`text-3xl font-bold ${
+                  (uptimeData?.uptime_pct ?? 0) >= 99 ? "text-green-400"
+                  : (uptimeData?.uptime_pct ?? 0) >= 90 ? "text-yellow-400"
+                  : "text-red-400"
+                }`}>
+                  {uptimeData?.uptime_pct.toFixed(2)}%
+                </span>
+                <span className="text-sm text-muted-foreground">uptime</span>
+              </div>
+              <ResponsiveContainer width="100%" height={60}>
+                <BarChart data={uptimeChartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }} barCategoryGap={1}>
+                  <XAxis dataKey="ts" hide />
+                  <YAxis hide domain={[0, 1]} />
+                  <Tooltip content={<UptimeTooltip />} />
+                  <Bar dataKey="value" radius={[2, 2, 0, 0]}>
+                    {uptimeChartData.map((entry, index) => (
+                      <Cell
+                        key={index}
+                        fill={entry.status === "up" ? "#22c55e" : "#ef4444"}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-green-500 inline-block" /> Up</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-red-500 inline-block" /> Down</span>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Backup size chart ── */}
       {chartData.length > 0 && (
         <Card>
           <CardHeader>
@@ -404,7 +571,9 @@ export function DatabaseDetailPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Backups</CardTitle>
-            <CardDescription>Chronological list — click Restore to recover</CardDescription>
+            <CardDescription>
+              Chronological list — ⭐ starred backups are exempt from retention rules
+            </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={fetchBackups} disabled={loadingBackups}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loadingBackups ? "animate-spin" : ""}`} />
@@ -416,6 +585,7 @@ export function DatabaseDetailPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8"></TableHead>
                   <TableHead>#</TableHead>
                   <TableHead>Filename</TableHead>
                   <TableHead>Date</TableHead>
@@ -428,14 +598,14 @@ export function DatabaseDetailPage() {
                 {loadingBackups ? (
                   Array.from({ length: 3 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 6 }).map((_, j) => (
+                      {Array.from({ length: 7 }).map((_, j) => (
                         <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : backups.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                       No backups yet. Click "Backup Now" to create one.
                     </TableCell>
                   </TableRow>
@@ -448,6 +618,17 @@ export function DatabaseDetailPage() {
                     const isLatest = idx === 0
                     return (
                       <TableRow key={backup.path} className={isLatest ? "bg-primary/5" : ""}>
+                        {/* Star */}
+                        <TableCell className="pr-0">
+                          <Button
+                            variant="ghost" size="icon"
+                            className={`h-6 w-6 ${backup.starred ? "text-yellow-400" : "text-muted-foreground/40 hover:text-yellow-400"}`}
+                            onClick={() => handleToggleStar(backup)}
+                            title={backup.starred ? "Remove from favourites" : "Mark as favourite (exempt from retention)"}
+                          >
+                            <Star className={`h-3.5 w-3.5 ${backup.starred ? "fill-yellow-400" : ""}`} />
+                          </Button>
+                        </TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {isLatest ? (
                             <Badge variant="secondary" className="text-xs">Latest</Badge>
@@ -455,11 +636,13 @@ export function DatabaseDetailPage() {
                             `#${backups.length - idx}`
                           )}
                         </TableCell>
-                        <TableCell
-                          className="font-mono text-xs max-w-[180px] truncate"
-                          title={backup.filename}
-                        >
-                          {backup.filename}
+                        <TableCell className="font-mono text-xs max-w-[180px]">
+                          <div className="truncate" title={backup.filename}>{backup.filename}</div>
+                          {backup.starred && backup.notes && (
+                            <div className="text-muted-foreground text-xs truncate max-w-[160px] mt-0.5" title={backup.notes}>
+                              {backup.notes}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm whitespace-nowrap text-muted-foreground">
                           {format(parseISO(backup.date), "MMM d, yyyy HH:mm")}
@@ -482,6 +665,17 @@ export function DatabaseDetailPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
+                            {/* Notes button — only for starred backups */}
+                            {backup.starred && (
+                              <Button
+                                variant="ghost" size="icon"
+                                className={`h-7 w-7 ${backup.notes ? "text-blue-400" : "text-muted-foreground/50 hover:text-blue-400"}`}
+                                onClick={() => { setNotesTarget(backup); setNotesText(backup.notes ?? "") }}
+                                title="Add/edit note"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             {backup.has_checksum && (
                               <Button
                                 variant="ghost" size="icon"
@@ -553,6 +747,30 @@ export function DatabaseDetailPage() {
         </CardContent>
       </Card>
 
+      {/* ── Notes dialog ── */}
+      <Dialog open={!!notesTarget} onOpenChange={(open) => { if (!open) setNotesTarget(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Notes — {notesTarget?.filename}</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={notesText}
+            onChange={(e) => setNotesText(e.target.value)}
+            placeholder="Add a note for this backup..."
+            className="min-h-[120px]"
+          />
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline"><X className="h-4 w-4 mr-1" /> Cancel</Button>
+            </DialogClose>
+            <Button onClick={handleSaveNotes} disabled={savingNotes}>
+              {savingNotes ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Restore confirm ── */}
       <AlertDialog open={!!restoreTarget} onOpenChange={(open: boolean) => { if (!open) { setRestoreTarget(null); setSkipSafetySnapshot(false) } }}>
         <AlertDialogContent>
@@ -561,16 +779,16 @@ export function DatabaseDetailPage() {
             <AlertDialogDescription asChild>
               <div>
                 <p>
-                  Ripristinerà <span className="font-semibold text-foreground">"{db.name}"</span> dal backup{" "}
+                  This will restore <span className="font-semibold text-foreground">"{db.name}"</span> from backup{" "}
                   <span className="font-semibold text-foreground break-all">"{restoreTarget?.filename}"</span>.
                 </p>
                 <p className="mt-2">
-                  <span className="text-amber-500 font-medium">⚠️ Attenzione:</span> I dati correnti verranno sovrascritti.
+                  <span className="text-amber-500 font-medium">Warning:</span> current data will be overwritten.
                 </p>
                 <div className="mt-4 rounded-md border border-muted bg-muted/30 p-3">
                   <p className="text-xs text-muted-foreground mb-2">
-                    Di default viene creato uno snapshot di sicurezza prima del restore (richiede che il DB sia raggiungibile).
-                    Se il DB è offline o non raggiungibile, spunta l'opzione qui sotto.
+                    By default a safety snapshot is taken before the restore.
+                    If the database is offline, check the option below.
                   </p>
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -579,8 +797,8 @@ export function DatabaseDetailPage() {
                       onCheckedChange={(v) => setSkipSafetySnapshot(!!v)}
                     />
                     <Label htmlFor={skipSnapshotId} className="text-sm cursor-pointer">
-                      Salta lo snapshot di sicurezza pre-restore
-                      <span className="ml-1 text-xs text-muted-foreground">(più veloce, meno sicuro)</span>
+                      Skip pre-restore safety snapshot
+                      <span className="ml-1 text-xs text-muted-foreground">(faster, less safe)</span>
                     </Label>
                   </div>
                 </div>
@@ -588,12 +806,12 @@ export function DatabaseDetailPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setSkipSafetySnapshot(false)}>Annulla</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setSkipSafetySnapshot(false)}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-amber-500 text-white hover:bg-amber-600"
               onClick={handleRestoreConfirmed}
             >
-              Ripristina
+              Restore
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

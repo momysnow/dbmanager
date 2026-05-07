@@ -1,5 +1,6 @@
 """Database management endpoints"""
 
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List
 
@@ -8,15 +9,24 @@ from api.models.database import (
     DatabaseUpdate,
     DatabaseResponse,
     DatabaseTestResult,
+    UptimeDataPoint,
+    UptimeResponse,
 )
 from api.dependencies import get_config_manager, get_db_manager
+from api.deps import require_role
 from config import ConfigManager
 from core.manager import DBManager
+from core.cron import CronManager
 
 router = APIRouter()
+_cron_manager = CronManager()
+
+_all_roles = [Depends(require_role("admin", "operator", "viewer"))]
+_admin_only = [Depends(require_role("admin"))]
+_admin_op = [Depends(require_role("admin", "operator"))]
 
 
-@router.get("/databases", response_model=List[DatabaseResponse])
+@router.get("/databases", response_model=List[DatabaseResponse], dependencies=_all_roles)
 async def list_databases(
     config_manager: ConfigManager = Depends(get_config_manager),
 ) -> List[DatabaseResponse]:
@@ -31,7 +41,7 @@ async def list_databases(
     return results
 
 
-@router.get("/databases/{database_id}", response_model=DatabaseResponse)
+@router.get("/databases/{database_id}", response_model=DatabaseResponse, dependencies=_all_roles)
 async def get_database(
     database_id: int, config_manager: ConfigManager = Depends(get_config_manager)
 ) -> DatabaseResponse:
@@ -49,7 +59,8 @@ async def get_database(
 
 
 @router.post(
-    "/databases", response_model=DatabaseResponse, status_code=status.HTTP_201_CREATED
+    "/databases", response_model=DatabaseResponse, status_code=status.HTTP_201_CREATED,
+    dependencies=_admin_only,
 )
 async def create_database(
     database: DatabaseCreate,
@@ -89,7 +100,7 @@ async def create_database(
     return created_model
 
 
-@router.put("/databases/{database_id}", response_model=DatabaseResponse)
+@router.put("/databases/{database_id}", response_model=DatabaseResponse, dependencies=_admin_only)
 async def update_database(
     database_id: int,
     database: DatabaseUpdate,
@@ -164,7 +175,7 @@ async def update_database(
     return updated_model
 
 
-@router.delete("/databases/{database_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/databases/{database_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_only)
 async def delete_database(
     database_id: int, config_manager: ConfigManager = Depends(get_config_manager)
 ) -> None:
@@ -178,13 +189,26 @@ async def delete_database(
             detail=f"Database with ID {database_id} not found",
         )
 
+    # Remove cron jobs
+    try:
+        _cron_manager.remove_job(database_id)
+    except Exception:
+        pass
+
+    # Remove associated schedules from config
+    config_manager.config["schedules"] = [
+        s for s in config_manager.config.get("schedules", [])
+        if s.get("database_id") != database_id
+    ]
+    config_manager.save_config()
+
     # Remove database
     config_manager.remove_database(database_id)
 
     return None
 
 
-@router.post("/databases/{database_id}/test", response_model=DatabaseTestResult)
+@router.post("/databases/{database_id}/test", response_model=DatabaseTestResult, dependencies=_admin_op)
 async def test_database_connection(
     database_id: int, db_manager: DBManager = Depends(get_db_manager)
 ) -> DatabaseTestResult:
@@ -212,3 +236,40 @@ async def test_database_connection(
         return DatabaseTestResult(
             success=False, message="Connection failed", error=str(e)
         )
+
+
+@router.get("/databases/{database_id}/uptime", response_model=UptimeResponse, dependencies=_all_roles)
+async def get_database_uptime(
+    database_id: int,
+    period: str = "week",
+    config_manager: ConfigManager = Depends(get_config_manager),
+) -> UptimeResponse:
+    """Get uptime history for a database"""
+    db = config_manager.get_database(database_id)
+    if not db:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Database with ID {database_id} not found",
+        )
+
+    windows = {"day": 1, "week": 7, "month": 30, "year": 365}
+    if period not in windows:
+        raise HTTPException(status_code=400, detail="period must be day, week, month, or year")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=windows[period])
+    cutoff_str = cutoff.isoformat()
+
+    history = config_manager.get_uptime_history(database_id)
+    filtered = [e for e in history if e["ts"] >= cutoff_str]
+
+    if filtered:
+        up_count = sum(1 for e in filtered if e["status"] == "up")
+        pct = round(up_count / len(filtered) * 100, 2)
+    else:
+        pct = 0.0
+
+    return UptimeResponse(
+        uptime_pct=pct,
+        period=period,
+        datapoints=[UptimeDataPoint(ts=e["ts"], status=e["status"]) for e in filtered],
+    )

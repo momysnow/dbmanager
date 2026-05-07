@@ -10,10 +10,14 @@ from api.models.storage import (
     StorageTestResult,
 )
 from api.dependencies import get_config_manager, get_db_manager
+from api.deps import require_role
 from config import ConfigManager
 from core.manager import DBManager
 
 router = APIRouter()
+
+_all_roles = [Depends(require_role("admin", "operator", "viewer"))]
+_admin_only = [Depends(require_role("admin"))]
 
 # All storage targets live under this config key
 CONFIG_KEY = "storage_targets"
@@ -37,7 +41,7 @@ def _to_response(target: dict) -> StorageResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/storage", response_model=List[StorageResponse])
+@router.get("/storage", response_model=List[StorageResponse], dependencies=_all_roles)
 async def list_storage(
     config_manager: ConfigManager = Depends(get_config_manager),
 ) -> List[StorageResponse]:
@@ -45,7 +49,7 @@ async def list_storage(
     return [_to_response(t) for t in _get_targets(config_manager)]
 
 
-@router.get("/storage/{storage_id}", response_model=StorageResponse)
+@router.get("/storage/{storage_id}", response_model=StorageResponse, dependencies=_all_roles)
 async def get_storage(
     storage_id: int,
     config_manager: ConfigManager = Depends(get_config_manager),
@@ -63,7 +67,8 @@ async def get_storage(
 
 
 @router.post(
-    "/storage", response_model=StorageResponse, status_code=status.HTTP_201_CREATED
+    "/storage", response_model=StorageResponse, status_code=status.HTTP_201_CREATED,
+    dependencies=_admin_only,
 )
 async def create_storage(
     payload: StorageCreate,
@@ -86,7 +91,7 @@ async def create_storage(
     return _to_response(data)
 
 
-@router.put("/storage/{storage_id}", response_model=StorageResponse)
+@router.put("/storage/{storage_id}", response_model=StorageResponse, dependencies=_admin_only)
 async def update_storage(
     storage_id: int,
     payload: StorageUpdate,
@@ -111,7 +116,7 @@ async def update_storage(
     return _to_response(updated)
 
 
-@router.delete("/storage/{storage_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/storage/{storage_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_only)
 async def delete_storage(
     storage_id: int,
     config_manager: ConfigManager = Depends(get_config_manager),
@@ -129,7 +134,7 @@ async def delete_storage(
     config_manager.save_config()
 
 
-@router.post("/storage/{storage_id}/test", response_model=StorageTestResult)
+@router.post("/storage/{storage_id}/test", response_model=StorageTestResult, dependencies=_admin_only)
 async def test_storage_connection(
     storage_id: int,
     db_manager: DBManager = Depends(get_db_manager),
@@ -159,7 +164,8 @@ async def test_storage_connection(
 
 
 @router.get(
-    "/s3-buckets", response_model=List[StorageResponse], include_in_schema=False
+    "/s3-buckets", response_model=List[StorageResponse], include_in_schema=False,
+    dependencies=_all_roles,
 )
 async def list_s3_buckets_compat(
     config_manager: ConfigManager = Depends(get_config_manager),
@@ -172,6 +178,7 @@ async def list_s3_buckets_compat(
     response_model=StorageResponse,
     status_code=201,
     include_in_schema=False,
+    dependencies=_admin_only,
 )
 async def create_s3_bucket_compat(
     payload: StorageCreate,
@@ -180,7 +187,7 @@ async def create_s3_bucket_compat(
     return await create_storage(payload, config_manager)
 
 
-@router.delete("/s3-buckets/{storage_id}", status_code=204, include_in_schema=False)
+@router.delete("/s3-buckets/{storage_id}", status_code=204, include_in_schema=False, dependencies=_admin_only)
 async def delete_s3_bucket_compat(
     storage_id: int,
     config_manager: ConfigManager = Depends(get_config_manager),

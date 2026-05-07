@@ -19,6 +19,8 @@ class NotificationType(Enum):
     RESTORE_FAILURE = "restore_failure"
     SCHEDULE_SUCCESS = "schedule_success"
     SCHEDULE_FAILURE = "schedule_failure"
+    DB_DOWN = "db_down"
+    DB_UP = "db_up"
 
 
 class BaseNotifier(ABC):
@@ -134,7 +136,7 @@ class SlackNotifier(BaseNotifier):
         try:
             # Determine color based on type
             color = "#36a64f"  # green
-            if "failure" in notification_type.value:
+            if "failure" in notification_type.value or "down" in notification_type.value:
                 color = "#ff0000"  # red
 
             # Build Slack message
@@ -209,7 +211,7 @@ class TeamsNotifier(BaseNotifier):
         try:
             # Determine theme color
             theme_color = "28a745"  # green
-            if "failure" in notification_type.value:
+            if "failure" in notification_type.value or "down" in notification_type.value:
                 theme_color = "dc3545"  # red
 
             # Build Teams message (Adaptive Card format)
@@ -271,7 +273,7 @@ class DiscordNotifier(BaseNotifier):
         try:
             # Determine color
             color = 3066993  # green
-            if "failure" in notification_type.value:
+            if "failure" in notification_type.value or "down" in notification_type.value:
                 color = 15158332  # red
 
             # Build Discord embed
@@ -420,4 +422,22 @@ class NotificationManager:
             database=database,
             backup_file=backup_file,
             error=error,
+        )
+
+    def send_db_down(self, database: str) -> bool:
+        """Send database down notification"""
+        return self.send(
+            NotificationType.DB_DOWN,
+            "🔴 Database Unreachable",
+            f"Database '{database}' is not responding to ping checks",
+            database=database,
+        )
+
+    def send_db_up(self, database: str) -> bool:
+        """Send database recovered notification"""
+        return self.send(
+            NotificationType.DB_UP,
+            "🟢 Database Recovered",
+            f"Database '{database}' is back online",
+            database=database,
         )

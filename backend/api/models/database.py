@@ -1,7 +1,7 @@
 """Database-related Pydantic models"""
 
 from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 
 class ConnectionParams(BaseModel):
@@ -81,3 +81,14 @@ class DatabaseTestResult(BaseModel):
     success: bool
     message: str
     error: Optional[str] = None
+
+
+class UptimeDataPoint(BaseModel):
+    ts: str
+    status: str  # "up" | "down"
+
+
+class UptimeResponse(BaseModel):
+    uptime_pct: float
+    period: str
+    datapoints: List[UptimeDataPoint]

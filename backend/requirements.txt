@@ -1,3 +1,9 @@
+# Database (async SQLAlchemy + Alembic)
+sqlalchemy[asyncio]>=2.0
+aiosqlite
+alembic
+sqlparse>=0.4
+
 # Core dependencies
 typer
 InquirerPy

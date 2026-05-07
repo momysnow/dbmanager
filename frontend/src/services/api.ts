@@ -27,6 +27,11 @@ api.interceptors.response.use(
       localStorage.removeItem(TOKEN_KEY)
       window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT))
     }
+    if (error.response?.status === 403) {
+      window.dispatchEvent(new CustomEvent("auth:forbidden", {
+        detail: error.response?.data?.detail ?? "Insufficient permissions",
+      }))
+    }
     return Promise.reject(error)
   }
 )
@@ -42,6 +47,20 @@ export const databasesApi = {
   test: (id: number) => api.post(`/databases/${id}/test`),
   listBackups: (id: number, location?: "local" | "s3") =>
     api.get(`/databases/${id}/backups${location ? `?location=${location}` : ""}`),
+  getUptime: (id: number, period: "day" | "week" | "month" | "year") =>
+    api.get(`/databases/${id}/uptime?period=${period}`),
+}
+
+export const backupMetadataApi = {
+  get: (filename: string) => api.get(`/backups/metadata/${encodeURIComponent(filename)}`),
+  update: (data: { filename: string; notes?: string; starred?: boolean }) =>
+    api.patch("/backups/metadata", data),
+}
+
+export const exportApi = {
+  getConfig: () => api.get("/export/config"),
+  getDockerCompose: () => api.get("/export/docker-compose", { responseType: "text" as const }),
+  getEnv: () => api.get("/export/env", { responseType: "text" as const }),
 }
 
 export const storageApi = {
@@ -97,6 +116,31 @@ export const backupsApi = {
   verify: (backupFile: string, location: "local" | "s3" = "local", databaseId?: number) =>
     api.post("/backups/verify", { backup_file: backupFile, location, database_id: databaseId }),
   getTaskStatus: (taskId: string) => api.get(`/tasks/${taskId}`),
+}
+
+export const usersApi = {
+  getAll: (skip = 0, limit = 100) => api.get(`/users?skip=${skip}&limit=${limit}`),
+  create: (data: { username: string; password: string; role: string }) =>
+    api.post("/users", data),
+  update: (id: number, data: { role?: string; is_active?: boolean }) =>
+    api.patch(`/users/${id}`, data),
+  resetPassword: (id: number, newPassword: string) =>
+    api.post(`/users/${id}/reset-password`, { new_password: newPassword }),
+  delete: (id: number) => api.delete(`/users/${id}`),
+}
+
+export const auditApi = {
+  getLogs: (params?: {
+    user_id?: number
+    action?: string
+    resource_type?: string
+    status?: string
+    from?: string
+    to?: string
+    limit?: number
+    offset?: number
+  }) => api.get("/audit-logs", { params }),
+  getActions: () => api.get<string[]>("/audit-logs/actions"),
 }
 
 export default api

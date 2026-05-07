@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Save, RefreshCw, Send, Eye, EyeOff } from "lucide-react"
+import { Save, RefreshCw, Send, Eye, EyeOff, Download } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { settingsApi, notificationsApi } from "@/services/api"
+import { settingsApi, notificationsApi, exportApi } from "@/services/api"
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
@@ -528,6 +528,101 @@ function NotificationsTab() {
   )
 }
 
+// ── Export Tab ────────────────────────────────────────────────────────────────
+function ExportTab() {
+  const [downloading, setDownloading] = useState<string | null>(null)
+
+  const triggerDownload = (content: string | object, filename: string, mime: string) => {
+    const text = typeof content === "string" ? content : JSON.stringify(content, null, 2)
+    const blob = new Blob([text], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportConfig = async () => {
+    setDownloading("config")
+    try {
+      const res = await exportApi.getConfig()
+      triggerDownload(res.data, "dbmanager-config.json", "application/json")
+      toast.success("Config exported")
+    } catch { toast.error("Export failed") } finally { setDownloading(null) }
+  }
+
+  const handleExportDockerCompose = async () => {
+    setDownloading("docker")
+    try {
+      const res = await exportApi.getDockerCompose()
+      triggerDownload(res.data as string, "docker-compose.yml", "text/yaml")
+      toast.success("docker-compose.yml exported")
+    } catch { toast.error("Export failed") } finally { setDownloading(null) }
+  }
+
+  const handleExportEnv = async () => {
+    setDownloading("env")
+    try {
+      const res = await exportApi.getEnv()
+      triggerDownload(res.data as string, ".env", "text/plain")
+      toast.success(".env exported")
+    } catch { toast.error("Export failed") } finally { setDownloading(null) }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Configuration JSON</CardTitle>
+          <CardDescription>
+            Full application config (databases, schedules, storage, settings). Sensitive fields are masked.
+            Use this to migrate or restore your configuration on another instance.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button onClick={handleExportConfig} disabled={!!downloading}>
+            {downloading === "config" ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download config.json
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Docker Compose</CardTitle>
+          <CardDescription>
+            Generated docker-compose.yml with service definitions for all configured databases.
+            Passwords are replaced with environment variable references.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button onClick={handleExportDockerCompose} disabled={!!downloading}>
+            {downloading === "docker" ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download docker-compose.yml
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Environment Variables (.env)</CardTitle>
+          <CardDescription>
+            Template .env file with all required environment variables for this configuration.
+            Fill in the passwords before use.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button onClick={handleExportEnv} disabled={!!downloading}>
+            {downloading === "env" ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download .env
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function SettingsPage() {
   return (
@@ -543,12 +638,14 @@ export function SettingsPage() {
           <TabsTrigger value="compression">Compression</TabsTrigger>
           <TabsTrigger value="encryption">Encryption</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          <TabsTrigger value="export">Export</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general"><GeneralTab /></TabsContent>
         <TabsContent value="compression"><CompressionTab /></TabsContent>
         <TabsContent value="encryption"><EncryptionTab /></TabsContent>
         <TabsContent value="notifications"><NotificationsTab /></TabsContent>
+        <TabsContent value="export"><ExportTab /></TabsContent>
       </Tabs>
     </div>
   )

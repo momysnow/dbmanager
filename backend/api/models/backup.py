@@ -72,3 +72,39 @@ class BackupInfo(BaseModel):
     has_checksum: bool
     location: str = "local"
     checksum_verified: Optional[bool] = None
+    notes: Optional[str] = None
+    starred: bool = False
+    date_starred: Optional[str] = None
+
+
+class BackupMetadataUpdate(BaseModel):
+    """Model for updating backup metadata"""
+
+    filename: str
+    notes: Optional[str] = None
+    starred: Optional[bool] = None
+
+
+class BackupMetadataResponse(BaseModel):
+    """Model for backup metadata response"""
+
+    filename: str
+    notes: str = ""
+    starred: bool = False
+    date_starred: Optional[str] = None
+
+
+class BackupVerifyRequest(BaseModel):
+    """Model for verifying backup integrity"""
+
+    backup_file: str
+    location: str = "local"
+    database_id: Optional[int] = None
+
+
+class BackupVerifyResponse(BaseModel):
+    """Model for backup integrity verification response"""
+
+    file: str
+    valid: bool
+    message: str

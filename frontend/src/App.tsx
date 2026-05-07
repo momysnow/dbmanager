@@ -1,8 +1,15 @@
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom"
+import { useEffect } from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider, useAuth } from "@/context/auth-context"
 import { Layout } from "@/components/layout/layout"
 import { Toaster } from "@/components/ui/sonner"
+import { toast } from "sonner"
+
+import { RoleGuard } from "@/components/RoleGuard"
+import UsersPage from "@/pages/users/page"
+import AuditPage from "@/pages/audit/page"
+import ChangePasswordPage from "@/pages/change-password/page"
 
 // Pages
 import { LoginPage } from "@/pages/login/page"
@@ -15,11 +22,31 @@ import { BackupsPage } from "@/pages/backups/page"
 import { DatabaseDetailPage } from "@/pages/databases/detail"
 import QueryPage from "@/pages/query/page"
 
+function ForbiddenToastListener() {
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail ?? "Insufficient permissions"
+      toast.error(msg)
+    }
+    window.addEventListener("auth:forbidden", handler)
+    return () => window.removeEventListener("auth:forbidden", handler)
+  }, [])
+  return null
+}
+
 function ProtectedRoutes() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, user } = useAuth()
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
+  }
+
+  if (user?.must_change_password) {
+    return (
+      <Routes>
+        <Route path="*" element={<ChangePasswordPage />} />
+      </Routes>
+    )
   }
 
   return (
@@ -32,7 +59,21 @@ function ProtectedRoutes() {
         <Route path="/storage" element={<StoragePage />} />
         <Route path="/backups" element={<BackupsPage />} />
         <Route path="/schedules" element={<SchedulesPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings" element={
+          <RoleGuard roles={["admin"]} redirect="/">
+            <SettingsPage />
+          </RoleGuard>
+        } />
+        <Route path="/users" element={
+          <RoleGuard roles={["admin"]} redirect="/">
+            <UsersPage />
+          </RoleGuard>
+        } />
+        <Route path="/audit" element={
+          <RoleGuard roles={["admin"]} redirect="/">
+            <AuditPage />
+          </RoleGuard>
+        } />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
@@ -58,6 +99,7 @@ function App() {
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <BrowserRouter>
         <AuthProvider>
+          <ForbiddenToastListener />
           <AppRoutes />
           <Toaster />
         </AuthProvider>
