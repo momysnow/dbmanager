@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { Save, RefreshCw, Send, Eye, EyeOff, Download } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Save, RefreshCw, Send, Eye, EyeOff, Download, Upload, RotateCw, Power } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,14 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { settingsApi, notificationsApi, exportApi } from "@/services/api"
+import {
+  settingsApi,
+  notificationsApi,
+  exportApi,
+  proxyApi,
+  configIoApi,
+  type ProxyConfig,
+} from "@/services/api"
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
@@ -623,6 +630,312 @@ function ExportTab() {
   )
 }
 
+// ── Proxy tab ────────────────────────────────────────────────────────────────
+function ProxyTab() {
+  const [cfg, setCfg] = useState<ProxyConfig | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null)
+
+  const loadAll = async () => {
+    setLoading(true)
+    try {
+      const [c, s] = await Promise.all([proxyApi.getConfig(), proxyApi.getStatus()])
+      setCfg(c.data)
+      setStatus(s.data as Record<string, unknown>)
+    } catch {
+      toast.error("Failed to load proxy state")
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { void loadAll() }, [])
+
+  const save = async () => {
+    if (!cfg) return
+    setSaving(true)
+    try {
+      await proxyApi.putConfig(cfg)
+      toast.success("Proxy config applied")
+      await loadAll()
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Save failed"
+      toast.error(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reload = async () => {
+    try { await proxyApi.reload(); toast.success("Caddy reloaded") }
+    catch { toast.error("Reload failed") }
+  }
+  const restart = async () => {
+    try { await proxyApi.restart(); toast.success("Caddy restarted"); setTimeout(loadAll, 1500) }
+    catch { toast.error("Restart failed") }
+  }
+
+  if (loading || !cfg) return <Skeleton className="h-64 w-full" />
+
+  const isHttps = cfg.mode === "https"
+  const showAcmeEmail = isHttps && (cfg.acme.method === "dns" || cfg.acme.method === "http-01")
+  const showDnsProvider = isHttps && cfg.acme.method === "dns"
+  const showManual = isHttps && cfg.acme.method === "manual"
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Reverse proxy (Caddy)</CardTitle>
+          <CardDescription>
+            Expose backend (/api) and frontend (/) under a single hostname with optional TLS.
+            Changes hot-reload Caddy — no downtime in most cases.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="proxy-enabled">Enabled</Label>
+            <Switch
+              id="proxy-enabled"
+              checked={cfg.enabled}
+              onCheckedChange={(v) => setCfg({ ...cfg, enabled: v })}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Mode</Label>
+              <Select value={cfg.mode} onValueChange={(v) => setCfg({ ...cfg, mode: v as ProxyConfig["mode"] })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="disabled">Disabled</SelectItem>
+                  <SelectItem value="http">HTTP (no TLS)</SelectItem>
+                  <SelectItem value="https">HTTPS</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="proxy-domain">Domain</Label>
+              <Input
+                id="proxy-domain"
+                value={cfg.domain}
+                onChange={(e) => setCfg({ ...cfg, domain: e.target.value })}
+                placeholder="db.example.com or localhost"
+              />
+            </div>
+          </div>
+
+          {isHttps && (
+            <>
+              <div>
+                <Label>Certificate method</Label>
+                <Select
+                  value={cfg.acme.method}
+                  onValueChange={(v) => setCfg({ ...cfg, acme: { ...cfg.acme, method: v as ProxyConfig["acme"]["method"] } })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dns">DNS-01 (Let's Encrypt via DNS API)</SelectItem>
+                    <SelectItem value="http-01">HTTP-01 (Let's Encrypt, public :80 required)</SelectItem>
+                    <SelectItem value="manual">Manual cert / key files</SelectItem>
+                    <SelectItem value="selfsigned">Self-signed (dev only)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {showAcmeEmail && (
+                <div>
+                  <Label htmlFor="acme-email">ACME contact email</Label>
+                  <Input
+                    id="acme-email"
+                    type="email"
+                    value={cfg.acme.email}
+                    onChange={(e) => setCfg({ ...cfg, acme: { ...cfg.acme, email: e.target.value } })}
+                  />
+                </div>
+              )}
+
+              {showDnsProvider && (
+                <div>
+                  <Label>DNS provider</Label>
+                  <Select
+                    value={cfg.acme.dns_provider ?? ""}
+                    onValueChange={(v) => setCfg({ ...cfg, acme: { ...cfg.acme, dns_provider: v as NonNullable<ProxyConfig["acme"]["dns_provider"]> } })}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select provider" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cloudflare">Cloudflare</SelectItem>
+                      <SelectItem value="route53">AWS Route53</SelectItem>
+                      <SelectItem value="digitalocean">DigitalOcean</SelectItem>
+                      <SelectItem value="gandi">Gandi</SelectItem>
+                      <SelectItem value="duckdns">DuckDNS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    The provider's API token must be set in the caddy container's environment
+                    (e.g. CF_API_TOKEN). Token names are not stored in this config.
+                  </p>
+                </div>
+              )}
+
+              {showManual && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="cert-path">Certificate path (PEM)</Label>
+                    <Input
+                      id="cert-path"
+                      value={cfg.manual_cert.cert_path}
+                      onChange={(e) => setCfg({ ...cfg, manual_cert: { ...cfg.manual_cert, cert_path: e.target.value } })}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="key-path">Key path (PEM)</Label>
+                    <Input
+                      id="key-path"
+                      value={cfg.manual_cert.key_path}
+                      onChange={(e) => setCfg({ ...cfg, manual_cert: { ...cfg.manual_cert, key_path: e.target.value } })}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+        <CardFooter className="gap-2">
+          <Button onClick={save} disabled={saving}>
+            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save & apply
+          </Button>
+          <Button variant="outline" onClick={reload}><RotateCw className="mr-2 h-4 w-4" />Reload</Button>
+          <Button variant="outline" onClick={restart}><Power className="mr-2 h-4 w-4" />Restart container</Button>
+        </CardFooter>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Status</CardTitle>
+          <CardDescription>Live state from the Caddy admin API.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <pre className="text-xs bg-muted p-3 rounded overflow-auto max-h-72">
+            {JSON.stringify(status, null, 2)}
+          </pre>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ── Import tab ───────────────────────────────────────────────────────────────
+function ImportTab() {
+  const [busy, setBusy] = useState<"download" | "downloadFull" | "upload" | null>(null)
+  const [merge, setMerge] = useState(false)
+  const [restoreBackups, setRestoreBackups] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const triggerDownload = (data: BlobPart, filename: string, type: string) => {
+    const blob = new Blob([data], { type })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadZip = async () => {
+    setBusy("download")
+    try {
+      const res = await configIoApi.exportZip()
+      triggerDownload(res.data, `dbmanager-config-${Date.now()}.zip`, "application/zip")
+      toast.success("Configuration downloaded")
+    } catch { toast.error("Download failed") } finally { setBusy(null) }
+  }
+
+  const handleDownloadFull = async () => {
+    setBusy("downloadFull")
+    try {
+      const res = await configIoApi.exportZipWithBackups()
+      triggerDownload(res.data, `dbmanager-full-${Date.now()}.zip`, "application/zip")
+      toast.success("Configuration + backups downloaded")
+    } catch { toast.error("Download failed") } finally { setBusy(null) }
+  }
+
+  const handleUpload = async (file: File) => {
+    setBusy("upload")
+    try {
+      const res = await configIoApi.importFile(file, merge, restoreBackups)
+      toast.success(`Imported: ${JSON.stringify(res.data)}`)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Import failed"
+      toast.error(msg)
+    } finally {
+      setBusy(null)
+      if (fileRef.current) fileRef.current.value = ""
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Download configuration</CardTitle>
+          <CardDescription>
+            Full config zip (databases, schedules, storage targets, notifications, encryption keys reference,
+            and reverse-proxy settings). Use this to migrate or rebuild an identical instance.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter className="gap-2">
+          <Button onClick={handleDownloadZip} disabled={!!busy}>
+            {busy === "download" ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download config (.zip)
+          </Button>
+          <Button variant="outline" onClick={handleDownloadFull} disabled={!!busy}>
+            {busy === "downloadFull" ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download config + backups (.zip)
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Upload configuration</CardTitle>
+          <CardDescription>
+            Restore from a previous export. Replace mode wipes the current configuration; merge keeps
+            existing entries and only adds missing ones.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="merge">Merge with existing config</Label>
+            <Switch id="merge" checked={merge} onCheckedChange={setMerge} />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="restore-backups">Restore backup files (if present)</Label>
+            <Switch id="restore-backups" checked={restoreBackups} onCheckedChange={setRestoreBackups} />
+          </div>
+          <Input
+            ref={fileRef}
+            type="file"
+            accept=".zip,.json"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void handleUpload(f)
+            }}
+            disabled={!!busy}
+          />
+        </CardContent>
+        <CardFooter>
+          <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={!!busy}>
+            {busy === "upload" ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            Choose file
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function SettingsPage() {
   return (
@@ -635,16 +948,20 @@ export function SettingsPage() {
       <Tabs defaultValue="general">
         <TabsList className="mb-4">
           <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="proxy">Proxy</TabsTrigger>
           <TabsTrigger value="compression">Compression</TabsTrigger>
           <TabsTrigger value="encryption">Encryption</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
-          <TabsTrigger value="export">Export</TabsTrigger>
+          <TabsTrigger value="config-io">Backup config</TabsTrigger>
+          <TabsTrigger value="export">Templates</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general"><GeneralTab /></TabsContent>
+        <TabsContent value="proxy"><ProxyTab /></TabsContent>
         <TabsContent value="compression"><CompressionTab /></TabsContent>
         <TabsContent value="encryption"><EncryptionTab /></TabsContent>
         <TabsContent value="notifications"><NotificationsTab /></TabsContent>
+        <TabsContent value="config-io"><ImportTab /></TabsContent>
         <TabsContent value="export"><ExportTab /></TabsContent>
       </Tabs>
     </div>

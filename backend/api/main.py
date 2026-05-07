@@ -24,6 +24,7 @@ from api.routers import (
 )
 from api.routers import users as users_router
 from api.routers import audit_logs as audit_logs_router
+from api.routers import proxy as proxy_router
 from api.deps import get_current_user, require_role
 from api.dependencies import config_manager, db_manager
 from api.task_manager import task_manager
@@ -146,6 +147,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     monitor.start()
     _register_sample_dbs_if_needed()
+
+    # Apply proxy config to Caddy on startup (idempotent — hot reload only).
+    try:
+        from proxy.config import ProxyConfigManager
+        from proxy.manager import ProxyManager
+        from proxy.runtime_print import print_runtime_config
+
+        print_runtime_config()
+        pmgr = ProxyConfigManager()
+        if pmgr.exists():
+            cfg = pmgr.load()
+            if cfg.is_configured():
+                ProxyManager(pmgr).apply(cfg, allow_restart_fallback=False)
+    except Exception as e:  # noqa: BLE001 — never block API startup on proxy errors
+        logger.warning("proxy startup apply failed: %s", e)
+
     yield
     monitor.stop()
     print("👋 DBManager API shutting down...")
@@ -208,6 +225,7 @@ app.include_router(dashboard.router, prefix="/api/v1", tags=["Dashboard"], depen
 app.include_router(export.router, prefix="/api/v1", tags=["Export"], dependencies=_admin_op)
 app.include_router(users_router.router, prefix="/api/v1", tags=["Users"])
 app.include_router(audit_logs_router.router, prefix="/api/v1", tags=["AuditLogs"])
+app.include_router(proxy_router.router, prefix="/api/v1", tags=["Proxy"])
 
 
 @app.get("/api/status", include_in_schema=True, tags=["Status"])

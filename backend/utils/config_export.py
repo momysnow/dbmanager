@@ -10,6 +10,11 @@ import tempfile
 
 from config import ConfigManager, CONFIG_DIR, CONFIG_FILE
 
+# Proxy config lives next to config.json — included in exports so a fresh
+# install can be restored to an identical state from a single zip.
+PROXY_CONFIG_FILENAME = "proxy.json"
+PROXY_CONFIG_FILE = CONFIG_DIR / PROXY_CONFIG_FILENAME
+
 
 class ConfigExporter:
     """Export and import configuration"""
@@ -44,11 +49,16 @@ class ConfigExporter:
             config_export = temp_path / "config.json"
             shutil.copy2(CONFIG_FILE, config_export)
 
+            # Copy proxy.json if present (reverse-proxy settings).
+            if PROXY_CONFIG_FILE.exists():
+                shutil.copy2(PROXY_CONFIG_FILE, temp_path / PROXY_CONFIG_FILENAME)
+
             # Create export metadata
             metadata = {
                 "export_date": datetime.now().isoformat(),
-                "version": "1.0",
+                "version": "1.1",
                 "includes_backups": include_backups,
+                "includes_proxy": PROXY_CONFIG_FILE.exists(),
             }
 
             with open(temp_path / "metadata.json", "w") as f:
@@ -182,6 +192,13 @@ class ConfigExporter:
                 self.config_manager.config = imported_config
                 self.config_manager.save_config()
 
+            # Restore proxy.json if present in the archive.
+            proxy_src = temp_path / PROXY_CONFIG_FILENAME
+            if proxy_src.exists():
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(proxy_src, PROXY_CONFIG_FILE)
+                summary["proxy_restored"] = True
+
             # Restore backups if requested
             if restore_backups and metadata.get("includes_backups"):
                 backups_source = temp_path / "backups"
@@ -220,10 +237,19 @@ class ConfigExporter:
             output_path_obj = Path(output_path)
 
         # Copy config with metadata
+        proxy_data: Optional[Dict[str, Any]] = None
+        if PROXY_CONFIG_FILE.exists():
+            try:
+                with open(PROXY_CONFIG_FILE, "r") as f:
+                    proxy_data = json.load(f)
+            except Exception:
+                proxy_data = None
+
         export_data = {
             "export_date": datetime.now().isoformat(),
-            "version": "1.0",
+            "version": "1.1",
             "config": self.config_manager.config,
+            "proxy": proxy_data,
         }
 
         with open(output_path_obj, "w") as f:
@@ -253,6 +279,12 @@ class ConfigExporter:
         # Extract config
         if "config" in import_data:
             imported_config = import_data["config"]
+            # Restore proxy.json if present in the JSON export.
+            proxy_data = import_data.get("proxy")
+            if proxy_data:
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                with open(PROXY_CONFIG_FILE, "w") as f:
+                    json.dump(proxy_data, f, indent=2)
         else:
             # Assume direct config format
             imported_config = import_data

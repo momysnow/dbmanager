@@ -12,6 +12,64 @@ from cli.settings import settings_menu
 from utils.ui import print_header, get_selection
 
 app = typer.Typer()
+proxy_app = typer.Typer(help="Manage the reverse proxy (Caddy)")
+app.add_typer(proxy_app, name="proxy")
+
+
+@proxy_app.command("bootstrap")
+def proxy_bootstrap(
+    force: bool = typer.Option(False, "--force", help="Reconfigure even if proxy.json exists"),
+) -> None:
+    """First-run setup: env-driven or interactive wizard."""
+    from proxy.wizard import bootstrap
+    from proxy.runtime_print import print_runtime_config
+
+    bootstrap(force=force)
+    print_runtime_config()
+
+
+@proxy_app.command("apply")
+def proxy_apply() -> None:
+    """Render Caddyfile + push to Caddy admin API (hot reload)."""
+    from proxy.config import ProxyConfigManager
+    from proxy.manager import ProxyManager
+
+    mgr = ProxyConfigManager()
+    if not mgr.exists():
+        console.print("[red]proxy.json missing — run `proxy bootstrap` first[/red]")
+        raise typer.Exit(code=1)
+    result = ProxyManager(mgr).apply(mgr.load())
+    console.print(result)
+
+
+@proxy_app.command("status")
+def proxy_status() -> None:
+    from proxy.config import ProxyConfigManager
+    from proxy.manager import ProxyManager
+
+    mgr = ProxyConfigManager()
+    cfg = mgr.load()
+    console.print(ProxyManager(mgr).status(cfg))
+
+
+@proxy_app.command("reload")
+def proxy_reload() -> None:
+    from proxy.config import ProxyConfigManager
+    from proxy.manager import ProxyManager
+
+    mgr = ProxyConfigManager()
+    ok = ProxyManager(mgr).hot_reload(mgr.load())
+    console.print("[green]reloaded[/green]" if ok else "[red]reload failed[/red]")
+
+
+@proxy_app.command("restart")
+def proxy_restart() -> None:
+    from proxy.config import ProxyConfigManager
+    from proxy.manager import ProxyManager
+
+    mgr = ProxyConfigManager()
+    ok = ProxyManager(mgr).restart_container(mgr.load())
+    console.print("[green]restarted[/green]" if ok else "[red]restart failed[/red]")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLI COMMANDS

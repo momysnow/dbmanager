@@ -30,6 +30,9 @@ class ConfigSync:
         self.config_manager = config_manager
         self.config_backup_key = "config/config.json"
         self.config_metadata_key = "config/metadata.json"
+        # Reverse-proxy config travels with the main config so a fresh restore
+        # produces an identical deployment (same domain, ACME settings, routes).
+        self.proxy_backup_key = "config/proxy.json"
 
     def get_config_target_id(self) -> Optional[int]:
         """
@@ -106,6 +109,18 @@ class ConfigSync:
                     f.write(metadata_str)
                 storage.upload_file(temp_metadata, self.config_metadata_key)
                 os.remove(temp_metadata)
+
+                # Best-effort upload of proxy.json (optional sibling file).
+                try:
+                    from utils.config_export import PROXY_CONFIG_FILE
+
+                    if PROXY_CONFIG_FILE.exists():
+                        storage.upload_file(
+                            str(PROXY_CONFIG_FILE), self.proxy_backup_key, metadata
+                        )
+                except Exception as e:
+                    if not silent:
+                        print(f"⚠️ proxy config upload skipped: {e}")
 
                 if not silent:
                     target_name = self.storage_manager.get_storage_name(target_id)
@@ -197,6 +212,18 @@ class ConfigSync:
 
                 # Reload config in memory
                 self.config_manager.config = self.config_manager._load_config()
+
+                # Best-effort download of proxy.json sibling.
+                try:
+                    from utils.config_export import PROXY_CONFIG_FILE
+
+                    if storage.get_file_info(self.proxy_backup_key):
+                        storage.download_file(
+                            self.proxy_backup_key, str(PROXY_CONFIG_FILE)
+                        )
+                        print("✅ Proxy config downloaded from storage")
+                except Exception as e:
+                    print(f"ℹ️  proxy config not synced: {e}")
                 return True
             else:
                 print("⚠️ Failed to download config from storage")

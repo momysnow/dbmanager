@@ -64,8 +64,11 @@ ENV DBMANAGER_DATA_DIR=/app/data
 
 # Setup entrypoint script
 RUN echo '#!/bin/bash\n\
+    set -e\n\
     # Start cron in background\n\
     cron\n\
+    # Reverse proxy bootstrap (env-driven or interactive on TTY)\n\
+    python main.py proxy bootstrap || echo "[entrypoint] proxy bootstrap skipped"\n\
     # Start API server in background\n\
     python main.py start-api\n\
     # Start CLI only if explicitly enabled\n\

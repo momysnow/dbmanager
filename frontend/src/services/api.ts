@@ -129,6 +129,48 @@ export const usersApi = {
   delete: (id: number) => api.delete(`/users/${id}`),
 }
 
+export type ProxyConfig = {
+  enabled: boolean
+  mode: "disabled" | "http" | "https"
+  domain: string
+  acme: {
+    method: "none" | "dns" | "http-01" | "manual" | "selfsigned"
+    email: string
+    dns_provider: "cloudflare" | "route53" | "digitalocean" | "gandi" | "duckdns" | null
+    credentials_env: string | null
+  }
+  manual_cert: { cert_path: string; key_path: string }
+  routes: { frontend_upstream: string; backend_upstream: string; backend_path_prefix: string }
+  admin_url: string
+  caddy_container: string
+}
+
+export const proxyApi = {
+  getConfig: () => api.get<ProxyConfig>("/proxy/config"),
+  putConfig: (data: ProxyConfig) => api.put("/proxy/config", data),
+  getStatus: () => api.get("/proxy/status"),
+  reload: () => api.post("/proxy/reload"),
+  restart: () => api.post("/proxy/restart"),
+}
+
+// Settings export/import — full config + proxy round-trip in one zip.
+export const configIoApi = {
+  exportZip: () =>
+    api.post("/settings/export", undefined, { params: { format: "zip", include_backups: false }, responseType: "blob" }),
+  exportZipWithBackups: () =>
+    api.post("/settings/export", undefined, { params: { format: "zip", include_backups: true }, responseType: "blob" }),
+  exportJson: () =>
+    api.post("/settings/export", undefined, { params: { format: "json" }, responseType: "blob" }),
+  importFile: (file: File, merge = false, restoreBackups = false) => {
+    const fd = new FormData()
+    fd.append("file", file)
+    return api.post("/settings/import", fd, {
+      params: { merge, restore_backups: restoreBackups },
+      headers: { "Content-Type": "multipart/form-data" },
+    })
+  },
+}
+
 export const auditApi = {
   getLogs: (params?: {
     user_id?: number
