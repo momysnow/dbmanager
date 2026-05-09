@@ -27,7 +27,7 @@ requests
 # Database drivers
 psycopg2-binary
 pymysql>=1.1.0
-pymssql>=2.2.11
+pymssql>=2.3.13
 
 # Cloud storage
 boto3>=1.34.0
