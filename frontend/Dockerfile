@@ -2,7 +2,7 @@
 # Build the static bundle in a node image, then serve it with nginx.
 # For local development with hot-reload, use Dockerfile.dev (bind-mount + vite dev server).
 
-FROM node:20-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
