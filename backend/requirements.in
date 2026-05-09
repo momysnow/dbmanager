@@ -30,7 +30,7 @@ pymysql>=1.1.0
 pymssql>=2.2.11
 
 # Cloud storage
-boto3>=1.34.0
+boto3>=1.43.6
 docker
 
 # Utilities
