@@ -8,7 +8,7 @@
 sqlalchemy[asyncio]>=2.0
 aiosqlite
 alembic
-sqlparse>=0.4
+sqlparse>=0.5.5
 
 # Core dependencies
 typer
