@@ -1,0 +1,18 @@
+node_modules
+dist
+.vite
+.cache
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+# NOTE: docker-entrypoint.sh is NOT excluded — Dockerfile.dev (used by the
+# default compose) needs it. The prod Dockerfile copies it into the builder
+# stage but the runtime nginx stage discards it.
+Dockerfile
+Dockerfile.dev
+.eslintcache
+coverage

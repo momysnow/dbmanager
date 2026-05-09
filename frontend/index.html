@@ -4,7 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <!--
+      CSP: Tailwind/shadcn produce a single bundled stylesheet at build time
+      (no runtime <style> tags or inline style attributes), so 'unsafe-inline'
+      can be dropped. Keep an eye on this if a dependency is added that
+      injects styles at runtime — re-allow only after auditing for XSS.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none';"
+    />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>DBManager</title>
   </head>
   <body>
     <div id="root"></div>

@@ -9,6 +9,10 @@ import pymysql
 from .base import BaseProvider
 from ..progress import BackupProgress
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class MySQLProvider(BaseProvider):
     def check_connection(self) -> bool:
@@ -44,7 +48,9 @@ class MySQLProvider(BaseProvider):
                 message=f"Dumping database {params['database']}...", step="Dumping"
             )
 
-        # Complete mysqldump with all database objects
+        # Complete mysqldump with all database objects.
+        # Password is passed via MYSQL_PWD env (NOT --password=...), so it
+        # doesn't show up in `ps` output on the host.
         cmd = [
             "mysqldump",
             "-h",
@@ -53,7 +59,6 @@ class MySQLProvider(BaseProvider):
             str(params["port"]),
             "-u",
             params["user"],
-            f"--password={params['password']}",
             params["database"],
             "--result-file",
             filepath,
@@ -71,8 +76,13 @@ class MySQLProvider(BaseProvider):
             "--dump-date",  # Add dump date as comment
         ]
 
+        env = os.environ.copy()
+        env["MYSQL_PWD"] = params["password"]
+
         try:
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(
+                cmd, check=False, capture_output=True, text=True, env=env
+            )
 
             # mysqldump may return exit code 0 even on auth/connection errors
             # Check stderr for errors AND file size
@@ -145,7 +155,9 @@ class MySQLProvider(BaseProvider):
                 message=f"Restoring database {params['database']}...", step="Restoring"
             )
 
-        # MySQL/MariaDB consume dump via stdin
+        # MySQL/MariaDB consume dump via stdin.
+        # Password is passed via MYSQL_PWD env (NOT --password=...), so it
+        # doesn't show up in `ps` output on the host.
         cmd = [
             "mysql",
             "-h",
@@ -154,13 +166,17 @@ class MySQLProvider(BaseProvider):
             str(params["port"]),
             "-u",
             params["user"],
-            f"--password={params['password']}",
             params["database"],
         ]
 
+        env = os.environ.copy()
+        env["MYSQL_PWD"] = params["password"]
+
         try:
             with open(backup_file, "r") as f:
-                subprocess.run(cmd, stdin=f, check=True, capture_output=True)
+                subprocess.run(
+                    cmd, stdin=f, check=True, capture_output=True, env=env
+                )
 
             if progress:
                 progress.step_completed("Database restored")

@@ -49,9 +49,11 @@ ENV PATH="$PATH:/opt/mssql-tools18/bin"
 
 WORKDIR /app
 
-# Copy requirements and install
-COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout=300 -r requirements.txt
+# Install from the locked, deterministic version list. requirements.in is
+# the human-edited input; requirements.lock is what the image actually
+# installs. See the header of requirements.lock for regeneration steps.
+COPY requirements.lock .
+RUN pip install --no-cache-dir --no-deps --timeout=300 -r requirements.lock
 
 # Copy source code
 COPY . .
@@ -62,21 +64,26 @@ RUN mkdir -p /app/data
 # Environment variable for app config
 ENV DBMANAGER_DATA_DIR=/app/data
 
-# Setup entrypoint script
-RUN echo '#!/bin/bash\n\
-    set -e\n\
-    # Start cron in background\n\
-    cron\n\
-    # Reverse proxy bootstrap (env-driven or interactive on TTY)\n\
-    python main.py proxy bootstrap || echo "[entrypoint] proxy bootstrap skipped"\n\
-    # Start API server in background\n\
+# Entrypoint: uvicorn becomes the foreground process via `exec`, so SIGTERM
+# from `docker stop` reaches the lifespan handler (graceful shutdown drains
+# audit queue, disposes DB engine, cancels in-flight backups). Compose runs
+# this with `init: true`, so an init shim (PID 1) forwards SIGTERM to this
+# bash script, which forwards it to uvicorn via `exec`.
+#
+# The legacy "API in background + tail -f" only kicks in when CLI mode is
+# explicitly enabled, where we need a TTY-friendly main loop.
+RUN printf '#!/bin/bash\nset -e\n\
+cron\n\
+python main.py proxy bootstrap || echo "[entrypoint] proxy bootstrap skipped"\n\
+if [ "$DBMANAGER_ENABLE_CLI" = "true" ]; then\n\
     python main.py start-api\n\
-    # Start CLI only if explicitly enabled\n\
-    if [ "$DBMANAGER_ENABLE_CLI" = "true" ]; then\n\
     exec python main.py interactive\n\
-    else\n\
-    # Keep container alive (API runs in background)\n\
-    tail -f /dev/null\n\
-    fi' > /entrypoint.sh && chmod +x /entrypoint.sh
+else\n\
+    exec python api_server.py\n\
+fi\n' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+# NOTE: Backend currently runs as root because the system `cron` daemon
+# (used by core/cron.py via python-crontab) requires it. If cron is moved to
+# an in-process scheduler (e.g. APScheduler), switch to a non-root USER here.
 
 ENTRYPOINT ["/entrypoint.sh"]

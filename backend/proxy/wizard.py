@@ -26,6 +26,9 @@ from proxy.config import (
     ProxyConfig,
     ProxyConfigManager,
     ProxyMode,
+    _DOMAIN_RE,
+    _EMAIL_RE,
+    _SAFE_PATH_RE,
     proxy_config_from_env,
 )
 
@@ -68,7 +71,8 @@ def _prompt_interactive() -> ProxyConfig:
     domain = (
         inquirer.text(
             message="Domain (e.g. db.example.com or localhost):",
-            validate=lambda v: bool(v.strip()),
+            validate=lambda v: bool(_DOMAIN_RE.match(v.strip().lower())),
+            invalid_message="Must be a valid FQDN or 'localhost' — no whitespace or special chars.",
         )
         .execute()
         .strip()
@@ -104,7 +108,8 @@ def _prompt_interactive() -> ProxyConfig:
             acme.email = (
                 inquirer.text(
                     message="ACME contact email:",
-                    validate=lambda v: "@" in v,
+                    validate=lambda v: bool(_EMAIL_RE.match(v.strip())),
+                    invalid_message="Enter a valid email (used by Let's Encrypt for renewal alerts).",
                 )
                 .execute()
                 .strip()
@@ -118,17 +123,27 @@ def _prompt_interactive() -> ProxyConfig:
             acme.dns_provider = DnsProvider(prov_choice)
             env_var = DNS_PROVIDER_ENV[acme.dns_provider]
             acme.credentials_env = env_var
-            if not os.getenv(env_var):
+            # The caddy container's entrypoint also resolves `${NAME}_FILE`
+            # → secret-file path, so accept either form as proof the token
+            # will be available at runtime.
+            file_var = f"{env_var}_FILE"
+            if not os.getenv(env_var) and not os.getenv(file_var):
                 console.print(
-                    f"[yellow]⚠ env var {env_var} is not set — proxy will fail "
-                    f"to issue certificates until you set it and restart caddy.[/yellow]"
+                    f"[yellow]⚠ neither {env_var} nor {file_var} is set — proxy will "
+                    f"fail to issue certificates until one is set and caddy is "
+                    f"restarted.[/yellow]"
                 )
 
         if acme.method == AcmeMethod.MANUAL:
+            _path_invalid = (
+                "Must be an absolute POSIX path with no whitespace or shell "
+                "metacharacters."
+            )
             manual.cert_path = (
                 inquirer.text(
                     message="Path to certificate file (PEM):",
-                    validate=lambda v: bool(v.strip()),
+                    validate=lambda v: bool(_SAFE_PATH_RE.match(v.strip())),
+                    invalid_message=_path_invalid,
                 )
                 .execute()
                 .strip()
@@ -136,7 +151,8 @@ def _prompt_interactive() -> ProxyConfig:
             manual.key_path = (
                 inquirer.text(
                     message="Path to private key file (PEM):",
-                    validate=lambda v: bool(v.strip()),
+                    validate=lambda v: bool(_SAFE_PATH_RE.match(v.strip())),
+                    invalid_message=_path_invalid,
                 )
                 .execute()
                 .strip()
@@ -148,7 +164,9 @@ def _prompt_interactive() -> ProxyConfig:
         domain=domain,
         acme=acme,
         manual_cert=manual,
-        admin_url=os.getenv("DBMANAGER_PROXY_ADMIN_URL", "http://caddy:2019"),
+        admin_url=os.getenv(
+            "DBMANAGER_PROXY_ADMIN_URL", "unix:///run/caddy-admin/admin.sock"
+        ),
         caddy_container=os.getenv("DBMANAGER_PROXY_CADDY_CONTAINER", "dbmanager-caddy"),
     )
 

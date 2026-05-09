@@ -15,7 +15,11 @@ from api.models.notifications import (
 from api.dependencies import get_config_manager, get_db_manager
 from config import ConfigManager
 from core.manager import DBManager
-from core.notifications import NotificationManager, NotificationType
+from core.notifications import (
+    NotificationManager,
+    NotificationType,
+    _assert_safe_webhook_url,
+)
 
 router = APIRouter()
 
@@ -109,6 +113,17 @@ async def update_webhook_notifications(
     update_data = settings.model_dump()
     if update_data.get("webhook_url") in (None, "") and current.get("webhook_url"):
         update_data.pop("webhook_url", None)
+
+    # Defence-in-depth: refuse loopback/private/cloud-metadata webhook URLs at
+    # write time, not only at send time. The send-time check is the
+    # authoritative guard, but storing a poisoned URL is bad hygiene and the
+    # admin has no signal that anything was wrong until a notification fires.
+    incoming_url = update_data.get("webhook_url")
+    if isinstance(incoming_url, str) and incoming_url:
+        try:
+            _assert_safe_webhook_url(incoming_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     config_manager.update_notification_settings(provider, **update_data)
     updated = config_manager.get_notification_settings(provider)

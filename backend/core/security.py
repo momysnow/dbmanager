@@ -1,7 +1,11 @@
+import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 from cryptography.fernet import Fernet
+
+logger = logging.getLogger(__name__)
 
 
 class SecurityManager:
@@ -38,18 +42,38 @@ class SecurityManager:
         # 3. Generate new key
         key = Fernet.generate_key()
 
-        # Ensure dir exists
+        # Ensure dir exists with strict perms first (owner-only).
         self._key_path.parent.mkdir(parents=True, exist_ok=True)
+        if sys.platform != "win32":
+            try:
+                os.chmod(self._key_path.parent, 0o700)
+            except OSError as exc:
+                logger.warning(
+                    "Could not chmod %s to 0700: %s", self._key_path.parent, exc
+                )
 
-        # Save key with strict permissions
-        with open(self._key_path, "wb") as f:
-            f.write(key)
-
-        # Set permissions to read/write only by owner (600)
+        # Save key with strict permissions (owner read/write only).
+        # Use os.open with mode so the file is never world-readable, even
+        # transiently between write and chmod.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(self._key_path, flags, 0o600)
         try:
-            os.chmod(self._key_path, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(key)
         except Exception:
-            pass  # Might fail on Windows or some FS
+            os.close(fd)
+            raise
+
+        if sys.platform != "win32":
+            try:
+                os.chmod(self._key_path, 0o600)
+            except OSError as exc:
+                # On Unix this is a hard failure: a world-readable master key
+                # is unacceptable. Refuse to continue.
+                raise RuntimeError(
+                    f"Failed to set 0600 perms on {self._key_path}: {exc}. "
+                    "Refusing to start with a potentially world-readable key."
+                ) from exc
 
         self._fernet = Fernet(key)
 

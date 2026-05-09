@@ -1,0 +1,34 @@
+# Production overlay. Apply on top of the base file:
+#
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.prod.yml \
+#     up -d --build
+#
+# What this changes vs the dev defaults:
+#   • frontend uses the multi-stage nginx image, NOT vite dev server.
+#   • bind mounts of source code are dropped — the image content wins.
+#   • backend keeps a named volume for /app/data only (config, sqlite, audit).
+#   • frontend healthcheck switched to wget (curl is not in nginx:alpine).
+#
+# Do NOT chain docker-compose.test.yml in production — it ships weak default
+# credentials and exposes test DBs on 127.0.0.1.
+
+services:
+  backend:
+    # Drop the source bind mount. Code lives in the image; only the data
+    # directory is persisted on the host.
+    volumes:
+      - dbmanager_data:/app/data
+      - ./caddy:/etc/dbmanager/caddy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes: []  # explicit reset so the dev bind mount does not leak in
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5173/healthz"]
+
+volumes:
+  dbmanager_data:

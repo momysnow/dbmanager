@@ -9,6 +9,10 @@ import psycopg2
 from .base import BaseProvider
 from ..progress import BackupProgress
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class PostgresProvider(BaseProvider):
     def check_connection(self) -> bool:

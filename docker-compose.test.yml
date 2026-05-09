@@ -1,5 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# docker-compose.override.yml  —  Test / Development infrastructure
+# docker-compose.test.yml  —  TEST / DEVELOPMENT INFRASTRUCTURE ONLY
+#
+# ⚠ DO NOT USE IN PRODUCTION ⚠
+# Ports are bound to 127.0.0.1 (loopback) only and the credentials below are
+# weak defaults intended for local testing. If you need real DBs in prod, run
+# them on dedicated hosts/managed services and never include this file in your
+# `docker compose -f` chain.
 #
 # This file is automatically merged by Docker Compose when you run:
 #   docker compose up
@@ -18,7 +24,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-testpassword}
       POSTGRES_DB: ${POSTGRES_DB:-testdb}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -37,11 +43,13 @@ services:
       MYSQL_USER: ${MYSQL_USER:-testuser}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-testpassword}
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      # Anonymous ping — keeps the password out of `docker inspect`, ps, and
+      # logs. Liveness only cares whether mysqld is accepting connections.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -55,8 +63,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -67,6 +75,12 @@ services:
     restart: unless-stopped
 
   seeder:
+    # Opt-in only. Run with `docker compose --profile seed up seeder` to
+    # populate the test DBs; left out of the default startup so it doesn't
+    # silently re-run sample-data writes on every `compose up`.
+    profiles:
+      - seed
+      - test
     build:
       context: ./backend
       dockerfile: Dockerfile

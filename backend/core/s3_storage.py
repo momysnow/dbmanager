@@ -9,6 +9,10 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 from core.storage_provider import StorageProvider
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class S3Storage(StorageProvider):
     """
@@ -74,7 +78,7 @@ class S3Storage(StorageProvider):
 
             if dedup_ref_key:
                 # DEDUPLICATION: Create a pointer object
-                print(f"♻️  Deduplication: creating pointer to {dedup_ref_key}")
+                logger.info(f"♻️  Deduplication: creating pointer to {dedup_ref_key}")
                 extra_args["Metadata"]["dedup_ref"] = dedup_ref_key
                 # We upload an empty body or minimal marker
                 self.client.put_object(
@@ -83,23 +87,23 @@ class S3Storage(StorageProvider):
                     Body=b"DEDUP_POINTER",
                     Metadata=extra_args["Metadata"],
                 )
-                print(f"✅ Uploaded pointer {remote_path} -> {dedup_ref_key}")
+                logger.info(f"✅ Uploaded pointer {remote_path} -> {dedup_ref_key}")
                 return True
 
             # Normal Upload
             self.client.upload_file(
                 local_path, self.bucket, remote_path, ExtraArgs=extra_args
             )
-            print(f"✅ Uploaded {local_path} to s3://{self.bucket}/{remote_path}")
+            logger.info(f"✅ Uploaded {local_path} to s3://{self.bucket}/{remote_path}")
             return True
         except FileNotFoundError:
-            print(f"❌ File not found: {local_path}")
+            logger.info(f"❌ File not found: {local_path}")
             return False
         except NoCredentialsError:
-            print("❌ No valid credentials for S3")
+            logger.info("❌ No valid credentials for S3")
             return False
         except ClientError as e:
-            print(f"❌ S3 upload failed: {e}")
+            logger.info(f"❌ S3 upload failed: {e}")
             return False
 
     def download_file(self, remote_path: str, local_path: str) -> bool:
@@ -124,18 +128,18 @@ class S3Storage(StorageProvider):
             target_key = remote_path
             if "dedup_ref" in metadata:
                 target_key = metadata["dedup_ref"]
-                print(
+                logger.info(
                     f"🔗 Resolving deduplication pointer: {remote_path} -> {target_key}"
                 )
 
             self.client.download_file(self.bucket, target_key, local_path)
-            print(f"✅ Downloaded s3://{self.bucket}/{target_key} to {local_path}")
+            logger.info(f"✅ Downloaded s3://{self.bucket}/{target_key} to {local_path}")
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
-                print(f"❌ File not found in S3: {remote_path}")
+                logger.info(f"❌ File not found in S3: {remote_path}")
             else:
-                print(f"❌ S3 download failed: {e}")
+                logger.info(f"❌ S3 download failed: {e}")
             return False
 
     def list_files(self, prefix: str = "", max_keys: int = 1000) -> List[Dict]:
@@ -171,7 +175,7 @@ class S3Storage(StorageProvider):
 
             return files
         except ClientError as e:
-            print(f"❌ S3 list failed: {e}")
+            logger.info(f"❌ S3 list failed: {e}")
             return []
 
     def delete_file(self, s3_key: str) -> bool:
@@ -186,10 +190,10 @@ class S3Storage(StorageProvider):
         """
         try:
             self.client.delete_object(Bucket=self.bucket, Key=s3_key)
-            print(f"✅ Deleted s3://{self.bucket}/{s3_key}")
+            logger.info(f"✅ Deleted s3://{self.bucket}/{s3_key}")
             return True
         except ClientError as e:
-            print(f"❌ S3 delete failed: {e}")
+            logger.info(f"❌ S3 delete failed: {e}")
             return False
 
     def test_connection(self) -> bool:
@@ -210,14 +214,14 @@ class S3Storage(StorageProvider):
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             if error_code == "404":
-                print(f"❌ Bucket '{self.bucket}' not found")
+                logger.info(f"❌ Bucket '{self.bucket}' not found")
             elif error_code == "403":
-                print(f"❌ Access denied to bucket '{self.bucket}'")
+                logger.info(f"❌ Access denied to bucket '{self.bucket}'")
             else:
-                print(f"❌ Connection test failed: {e}")
+                logger.info(f"❌ Connection test failed: {e}")
             return False
         except NoCredentialsError:
-            print("❌ No valid credentials")
+            logger.info("❌ No valid credentials")
             return False
 
     def get_file_info(self, s3_key: str) -> Optional[Dict]:
@@ -242,5 +246,5 @@ class S3Storage(StorageProvider):
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return None
-            print(f"❌ Failed to get file info: {e}")
+            logger.info(f"❌ Failed to get file info: {e}")
             return None

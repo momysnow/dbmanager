@@ -11,6 +11,25 @@ import pymssql
 from .base import BaseProvider
 from ..progress import BackupProgress
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _quote_ident(name: str) -> str:
+    """Bracket-quote a SQL Server identifier and escape inner ``]``.
+
+    SQL Server delimits identifiers with ``[...]`` and escapes a literal
+    ``]`` inside as ``]]``. Today schema/table names reach this code only
+    via INFORMATION_SCHEMA, which the engine itself populates — so the f-
+    string interpolation is technically safe. This helper exists so the
+    next person who plumbs a user-controlled name into one of these queries
+    cannot accidentally introduce SQL injection.
+    """
+    if name is None:
+        raise ValueError("identifier is required")
+    return "[" + str(name).replace("]", "]]") + "]"
+
 
 class SQLServerProvider(BaseProvider):
     def check_connection(self) -> bool:
@@ -44,16 +63,28 @@ class SQLServerProvider(BaseProvider):
         try:
             import docker
 
+            from ..docker_safety import (
+                UnsafeContainerTargetError,
+                assert_target_is_user_db,
+            )
+
             client = docker.from_env()
 
             # Try to get container by name (host might be container name)
             container_name = self.config["params"]["host"]
+            # Refuse to exec into DBManager's own containers — the docker
+            # socket proxy can't enforce this scoping itself.
+            try:
+                assert_target_is_user_db(container_name)
+            except UnsafeContainerTargetError as exc:
+                logger.info(f"[DEBUG] Docker API refused: {exc}")
+                return False
             try:
                 container = client.containers.get(container_name)
                 is_running = container.status == "running"
 
                 if not is_running:
-                    print(
+                    logger.info(
                         f"[DEBUG] Docker API: Container '{container_name}' not running "
                         f"(status: {container.status})"
                     )
@@ -63,33 +94,33 @@ class SQLServerProvider(BaseProvider):
                 try:
                     exit_code, output = container.exec_run("echo test")
                     if exit_code == 0:
-                        print(
+                        logger.info(
                             f"[DEBUG] Docker API: Container '{container_name}' "
                             "accessible ✅"
                         )
                         return True
                     else:
-                        print(
+                        logger.info(
                             f"[DEBUG] Docker API: Container '{container_name}' "
                             f"not executable (exit: {exit_code})"
                         )
                         return False
                 except Exception as e:
-                    print(
+                    logger.info(
                         f"[DEBUG] Docker API: Container '{container_name}' exec failed "
                         f"- {e}"
                     )
                     return False
 
             except Exception as e:
-                print(
+                logger.info(
                     f"[DEBUG] Docker API: Container '{container_name}' not found "
                     f"- {type(e).__name__}"
                 )
                 # Container not found by name, can't use Docker API
                 return False
         except Exception as e:
-            print(f"[DEBUG] Docker API unavailable: {type(e).__name__}")
+            logger.info(f"[DEBUG] Docker API unavailable: {type(e).__name__}")
             # Docker not available or other error
             return False
 
@@ -114,28 +145,28 @@ class SQLServerProvider(BaseProvider):
         # Does NOT support differential. Proceed only if backup_type is full.
         if backup_type == "full" and self._can_use_mssql_scripter():
             try:
-                print("Using mssql-scripter (complete backup with all objects)")
+                logger.info("Using mssql-scripter (complete backup with all objects)")
                 return self._backup_mssql_scripter(backup_dir, timestamp)
             except Exception as e:
-                print(f"mssql-scripter failed ({e}), trying Docker API...")
+                logger.info(f"mssql-scripter failed ({e}), trying Docker API...")
         elif backup_type != "full":
-            print(f"mssql-scripter skipped (does not support {backup_type})")
+            logger.info(f"mssql-scripter skipped (does not support {backup_type})")
 
         # Priority 2: Docker API for native .bak
         # Supports DIFFERENTIAL
         if self._can_use_docker_api():
             try:
-                print(f"Using Docker API (native .bak format, type={backup_type})")
+                logger.info(f"Using Docker API (native .bak format, type={backup_type})")
                 return self._backup_native_bak(
                     backup_dir, timestamp, differential=(backup_type == "differential")
                 )
             except Exception as e:
-                print(f"Docker API failed ({e}), using sqlcmd fallback...")
+                logger.info(f"Docker API failed ({e}), using sqlcmd fallback...")
 
         # Priority 3: sqlcmd fallback (basic but works everywhere)
         # Does NOT support differential
         if backup_type == "full":
-            print("Using sqlcmd fallback (basic schema+data)")
+            logger.info("Using sqlcmd fallback (basic schema+data)")
             return self._backup_sql_script(backup_dir, timestamp)
         else:
             raise ValueError(
@@ -189,7 +220,12 @@ class SQLServerProvider(BaseProvider):
         import tarfile
         import io
 
+        from ..docker_safety import assert_target_is_user_db
+
         params = self.config["params"]
+        # Defence-in-depth: never exec into a DBManager system container even
+        # if config validation slipped through.
+        assert_target_is_user_db(params["host"])
         suffix = "_diff.bak" if differential else ".bak"
         filename = f"{self.config['name']}_{timestamp}{suffix}"
         filepath = os.path.join(backup_dir, filename)
@@ -260,7 +296,7 @@ class SQLServerProvider(BaseProvider):
 
         # Clean up backup file in container
         try:
-            container.exec_run(f"rm {backup_path_in_container}")
+            container.exec_run(["rm", "-f", backup_path_in_container])
         except Exception:
             pass
 
@@ -393,8 +429,10 @@ class SQLServerProvider(BaseProvider):
                 f.write(f"\n-- Table: [{schema}].[{table}]\n")
 
                 # Drop existing table
-                f.write(f"IF OBJECT_ID('[{schema}].[{table}]', 'U') IS NOT NULL\n")
-                f.write(f"    DROP TABLE [{schema}].[{table}];\nGO\n\n")
+                qschema = _quote_ident(schema)
+                qtable = _quote_ident(table)
+                f.write(f"IF OBJECT_ID('{qschema}.{qtable}', 'U') IS NOT NULL\n")
+                f.write(f"    DROP TABLE {qschema}.{qtable};\nGO\n\n")
 
                 # Get column definitions
                 cursor.execute(
@@ -574,6 +612,9 @@ class SQLServerProvider(BaseProvider):
         if self._can_use_docker_api():
             import docker
 
+            from ..docker_safety import assert_target_is_user_db
+
+            assert_target_is_user_db(params["host"])
             client = docker.from_env()
             container = client.containers.get(params["host"])
 
@@ -614,7 +655,7 @@ class SQLServerProvider(BaseProvider):
             try:
                 subprocess.run(cmd, env=env, check=True, capture_output=True)
                 # Clean up
-                container.exec_run(f"rm {container_path}")
+                container.exec_run(["rm", "-f", container_path])
                 return True
             except subprocess.CalledProcessError as e:
                 error_msg = e.stderr.decode() if e.stderr else str(e)
@@ -630,7 +671,7 @@ class SQLServerProvider(BaseProvider):
         params = self.config["params"]
 
         # First, drop all user tables to ensure clean restore
-        print("Cleaning database: dropping all user tables...")
+        logger.info("Cleaning database: dropping all user tables...")
         conn = pymssql.connect(
             server=params["host"],
             port=str(params["port"]),
@@ -664,14 +705,14 @@ class SQLServerProvider(BaseProvider):
         for schema, table in tables_to_drop:
             try:
                 cursor.execute(f"DROP TABLE [{schema}].[{table}]")
-                print(f"  Dropped [{schema}].[{table}]")
+                logger.info(f"  Dropped [{schema}].[{table}]")
             except Exception as e:
-                print(f"  Warning: Could not drop [{schema}].[{table}]: {e}")
+                logger.info(f"  Warning: Could not drop [{schema}].[{table}]: {e}")
 
         conn.commit()
         conn.close()
 
-        print(f"Dropped {len(tables_to_drop)} user tables. Starting restore...")
+        logger.info(f"Dropped {len(tables_to_drop)} user tables. Starting restore...")
 
         # Now restore from SQL script
         env = os.environ.copy()

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import Optional
+from typing import Optional, Set
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -15,6 +15,29 @@ logger = logging.getLogger(__name__)
 _ALWAYS_AUDIT_PREFIXES = ("/api/v1/auth/",)
 # Methods that are always audited (state-changing)
 _AUDIT_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# 401/403 are security-relevant — write them synchronously so a SIGTERM
+# during shutdown can never silently drop a denial event.
+_SYNC_AUDIT_STATUS = {401, 403}
+
+# Track in-flight async audit tasks so the lifespan shutdown can drain them.
+_pending_audit_tasks: "Set[asyncio.Task]" = set()
+
+
+async def drain_pending_audits(timeout: float = 5.0) -> int:
+    """Wait up to `timeout` seconds for fire-and-forget audit writes to finish.
+
+    Returns the number of tasks that were still pending when called. Safe to
+    call repeatedly; a no-op if the queue is empty.
+    """
+    if not _pending_audit_tasks:
+        return 0
+    pending = list(_pending_audit_tasks)
+    done, still_pending = await asyncio.wait(pending, timeout=timeout)
+    if still_pending:
+        logger.warning(
+            "audit drain: %d task(s) still pending after %.1fs", len(still_pending), timeout
+        )
+    return len(pending)
 
 
 def _should_audit(method: str, path: str, status_code: int) -> bool:
@@ -47,20 +70,40 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         action = f"http.{request.method.lower()}"
         resource_type = request.url.path
+        details = {
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        }
 
-        asyncio.create_task(
-            _write_audit(
+        if response.status_code in _SYNC_AUDIT_STATUS:
+            # Block the response on the audit write. Costs ~one DB round-trip
+            # per denial but guarantees the event lands in the log even if the
+            # process is killed immediately afterwards.
+            await _write_audit(
                 action=action,
                 resource_type=resource_type,
                 status=status_str,
                 user=user,
                 request=request,
-                details={
-                    "status_code": response.status_code,
-                    "duration_ms": duration_ms,
-                },
+                details=details,
             )
-        )
+        else:
+            # Successful and non-security-critical paths use a fire-and-forget
+            # task so latency stays below the audit DB round-trip. Tasks are
+            # tracked in a module-level set so the lifespan shutdown can drain
+            # them; without that, SIGTERM cancels them mid-write.
+            task = asyncio.create_task(
+                _write_audit(
+                    action=action,
+                    resource_type=resource_type,
+                    status=status_str,
+                    user=user,
+                    request=request,
+                    details=details,
+                )
+            )
+            _pending_audit_tasks.add(task)
+            task.add_done_callback(_pending_audit_tasks.discard)
 
         return response
 

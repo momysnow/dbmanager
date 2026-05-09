@@ -6,6 +6,10 @@ import json
 
 from .storage_provider import StorageProvider
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Lazy import for smbprotocol to avoid requirement if not used
 try:
     import smbclient
@@ -81,7 +85,7 @@ class SMBStorage(StorageProvider):
         dedup_ref_key: Optional[str] = None,
     ) -> bool:
         if not os.path.exists(local_path):
-            print(f"File not found: {local_path}")
+            logger.info(f"File not found: {local_path}")
             return False
 
         self._register_session()
@@ -101,14 +105,14 @@ class SMBStorage(StorageProvider):
                             smbclient.makedirs(parent_dir)
 
                         smbshutil.copyfile(ref_path, full_path)
-                        print(f"✅ Deduplicated upload (copied from {dedup_ref_key})")
+                        logger.info(f"✅ Deduplicated upload (copied from {dedup_ref_key})")
                         # We still need to save metadata? SMB doesn't natively support
                         # arbitrary xattrs easily across all servers.
                         # We will use a sidecar .metadata.json file for SMB
                         self._save_metadata(remote_path, metadata)
                         return True
                 except Exception as e:
-                    print(f"⚠️ Deduplication failed, falling back to upload: {e}")
+                    logger.info(f"⚠️ Deduplication failed, falling back to upload: {e}")
 
             # Normal upload
             # Ensure parent dir exists
@@ -124,7 +128,7 @@ class SMBStorage(StorageProvider):
             return True
 
         except Exception as e:
-            print(f"❌ SMB Upload failed: {e}")
+            logger.info(f"❌ SMB Upload failed: {e}")
             return False
 
     def _save_metadata(
@@ -141,7 +145,7 @@ class SMBStorage(StorageProvider):
             with smbclient.open_file(full_path, mode="w") as f:
                 json.dump(metadata, f)
         except Exception as e:
-            print(f"⚠️ Failed to save metadata: {e}")
+            logger.info(f"⚠️ Failed to save metadata: {e}")
 
     def download_file(self, remote_path: str, local_path: str) -> bool:
         self._register_session()
@@ -153,7 +157,7 @@ class SMBStorage(StorageProvider):
                     shutil.copyfileobj(remote_f, local_f)
             return True
         except Exception as e:
-            print(f"❌ SMB Download failed: {e}")
+            logger.info(f"❌ SMB Download failed: {e}")
             return False
 
     def delete_file(self, remote_path: str) -> bool:
@@ -171,7 +175,7 @@ class SMBStorage(StorageProvider):
 
             return True
         except Exception as e:
-            print(f"❌ SMB Delete failed: {e}")
+            logger.info(f"❌ SMB Delete failed: {e}")
             return False
 
     def list_files(
@@ -219,7 +223,7 @@ class SMBStorage(StorageProvider):
                 pass
 
         except Exception as e:
-            print(f"⚠️ SMB List failed: {e}")
+            logger.info(f"⚠️ SMB List failed: {e}")
             return []
 
         if max_keys:
@@ -258,7 +262,7 @@ class SMBStorage(StorageProvider):
         try:
             # Need to install smbprotocol first
             if not SMB_AVAILABLE:
-                print("❌ smbprotocol library missing")
+                logger.info("❌ smbprotocol library missing")
                 return False
 
             self._register_session()
@@ -268,5 +272,5 @@ class SMBStorage(StorageProvider):
             smbclient.listdir(root_path)
             return True
         except Exception as e:
-            print(f"❌ SMB Connection failed: {e}")
+            logger.info(f"❌ SMB Connection failed: {e}")
             return False

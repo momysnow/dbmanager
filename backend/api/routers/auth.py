@@ -1,17 +1,38 @@
+import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime
 from typing import Deque, Dict, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import auth_manager, get_current_user
+from api.deps import COOKIE_NAME, auth_manager, get_current_user
 from core.audit import record_audit
 from db.engine import get_db
 from db.models.user import User
+
+
+def _cookie_kwargs() -> Dict[str, object]:
+    """Cookie attributes used by login/logout. SameSite=Strict + httpOnly +
+    Secure (unless explicitly disabled for local HTTP dev) make this
+    cookie unreadable from JS and not sent on cross-site requests."""
+    insecure = os.getenv("DBMANAGER_COOKIE_INSECURE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    return {
+        "key": COOKIE_NAME,
+        "httponly": True,
+        "secure": not insecure,
+        "samesite": "strict",
+        # Scope to the v1 API surface so a future /api/v2 with different
+        # validation rules cannot inherit the v1 session cookie.
+        "path": "/api/v1",
+    }
 
 router = APIRouter()
 
@@ -33,8 +54,12 @@ class PasswordChange(BaseModel):
 
 
 # --- Simple in-memory rate limiter -------------------------------------------
-# Deliberately tiny — good enough for single-node deploys. Swap for redis if
-# we ever run >1 api replica.
+# IMPORTANT: state is per-process. Safe for single-node deploys (the default
+# docker-compose ships with one backend replica). If you scale horizontally
+# you MUST front the API with a shared store (Redis / DB) — otherwise an
+# attacker can spread brute-force attempts across replicas to bypass the
+# limits. The startup hook in api/main.py refuses placeholder JWT secrets
+# which is the more important brute-force mitigation.
 _WINDOW_SECONDS = 60
 _IP_MAX = 5
 _USER_MAX = 10
@@ -88,6 +113,7 @@ def _client_ip(request: Request) -> str:
 @router.post("/token")
 async def login_for_access_token(
     request: Request,
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
@@ -141,7 +167,39 @@ async def login_for_access_token(
     access_token = auth_manager.create_access_token(
         data={"sub": user.username, "tv": user.token_version}
     )
+    # Set httpOnly+Secure+SameSite=Strict cookie so the browser ships the
+    # token automatically without exposing it to JS (XSS-safe).
+    response.set_cookie(
+        value=access_token,
+        max_age=auth_manager.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        **_cookie_kwargs(),
+    )
+    # Body still includes the token for non-browser clients (CLI, scripts).
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+async def logout(
+    response: Response,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        # Must mirror the path used by login (_cookie_kwargs); browsers
+        # delete cookies only on an exact (domain, path) match.
+        path=_cookie_kwargs()["path"],
+        samesite="strict",
+        secure=_cookie_kwargs()["secure"],
+        httponly=True,
+    )
+    await record_audit(
+        action="auth.logout",
+        status="success",
+        user=current_user,
+        request=request,
+    )
+    return {"detail": "Logged out"}
 
 
 @router.get("/me", response_model=UserMe)

@@ -35,7 +35,11 @@ function ForbiddenToastListener() {
 }
 
 function ProtectedRoutes() {
-  const { isAuthenticated, user } = useAuth()
+  const { isAuthenticated, isLoading, user } = useAuth()
+
+  if (isLoading) {
+    return null
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
@@ -81,7 +85,11 @@ function ProtectedRoutes() {
 }
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (isLoading) {
+    return null
+  }
 
   return (
     <Routes>

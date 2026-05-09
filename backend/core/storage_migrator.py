@@ -7,6 +7,10 @@ import os
 import tempfile
 from typing import Any, Callable, Dict, Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class StorageMigrator:
     """
@@ -44,9 +48,9 @@ class StorageMigrator:
         Returns:
             True if migration successful, False otherwise
         """
-        print(f"\n🔄 Starting backup migration for database {db_id}")
-        print(f"   From: {self.storage_manager.get_storage_name(old_storage_id)}")
-        print(f"   To:   {self.storage_manager.get_storage_name(new_storage_id)}")
+        logger.info(f"\n🔄 Starting backup migration for database {db_id}")
+        logger.info(f"   From: {self.storage_manager.get_storage_name(old_storage_id)}")
+        logger.info(f"   To:   {self.storage_manager.get_storage_name(new_storage_id)}")
 
         try:
             # Get storage instances
@@ -54,7 +58,7 @@ class StorageMigrator:
             new_storage = self.storage_manager.get_storage(new_storage_id)
 
             if not old_storage or not new_storage:
-                print("❌ Failed to initialize storage providers")
+                logger.info("❌ Failed to initialize storage providers")
                 return False
 
             # List all backups in old storage
@@ -65,11 +69,11 @@ class StorageMigrator:
             backups = old_storage.list_files(prefix)
 
             if not backups:
-                print("ℹ️  No backups found in old storage")
+                logger.info("ℹ️  No backups found in old storage")
                 return True
 
             total = len(backups)
-            print(f"📦 Found {total} backup(s) to migrate")
+            logger.info(f"📦 Found {total} backup(s) to migrate")
 
             # Migrate each backup
             success_count = 0
@@ -84,7 +88,7 @@ class StorageMigrator:
                     if progress_callback:
                         progress_callback(i, total, filename)
                     else:
-                        print(f"  [{i}/{total}] Migrating {filename}...")
+                        logger.info(f"  [{i}/{total}] Migrating {filename}...")
 
                     try:
                         # Download from old storage
@@ -115,19 +119,19 @@ class StorageMigrator:
                             pass
 
                     except Exception as e:
-                        print(f"  ⚠️  Error migrating {filename}: {e}")
+                        logger.info(f"  ⚠️  Error migrating {filename}: {e}")
                         failed_files.append(filename)
 
             # Summary
-            print(f"\n✅ Migration complete: {success_count}/{total} successful")
+            logger.info(f"\n✅ Migration complete: {success_count}/{total} successful")
             if failed_files:
-                print(f"⚠️  Failed files: {', '.join(failed_files)}")
+                logger.info(f"⚠️  Failed files: {', '.join(failed_files)}")
                 return False
 
             return True
 
         except Exception as e:
-            print(f"❌ Migration failed: {e}")
+            logger.info(f"❌ Migration failed: {e}")
             return False
 
     def estimate_migration_size(
@@ -159,5 +163,5 @@ class StorageMigrator:
                 "size_mb": round(total_size / (1024 * 1024), 2),
             }
         except Exception as e:
-            print(f"⚠️ Failed to estimate migration size: {e}")
+            logger.info(f"⚠️ Failed to estimate migration size: {e}")
             return {"count": 0, "size_bytes": 0, "size_mb": 0}

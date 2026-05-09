@@ -5,7 +5,14 @@ from typing import Optional, Dict, Any, List
 
 
 class ConnectionParams(BaseModel):
-    """Model for database connection parameters"""
+    """Model for database connection parameters.
+
+    extra=forbid: unknown keys raise 422 instead of being silently persisted.
+    The previous extra=allow let an admin write {"params": {"is_admin": true}}
+    into config.json with no provider use for the field — pollution at best,
+    a confused-deputy vector at worst if a downstream consumer ever reads
+    such a key. Add new provider params here when needed.
+    """
 
     host: str = Field(..., description="Database host")
     port: int = Field(..., description="Database port")
@@ -18,10 +25,10 @@ class ConnectionParams(BaseModel):
         False, description="Trust server certificate (SQL Server)"
     )
     driver: Optional[str] = Field(None, description="ODBC Driver (SQL Server)")
+    uri: Optional[str] = Field(None, description="Connection URI (MongoDB)")
 
-    # Allow extra fields for flexibility
     class Config:
-        extra = "allow"
+        extra = "forbid"
 
 
 class DatabaseCreate(BaseModel):

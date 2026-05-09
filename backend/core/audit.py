@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import Request
 
@@ -36,26 +36,42 @@ def _get_client_ip(request: Request) -> Optional[str]:
 _MAX_DETAIL_BYTES = 4096
 
 
+_SECRET_KEY_TAGS = (
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "credential",
+    "private_key",
+    "access_key",
+)
+
+
 def _sanitize_details(details: Any) -> Any:
-    """Truncate oversized details and strip obvious secret-looking values."""
+    """Truncate oversized details and strip obvious secret-looking values.
+
+    Recurses into nested dicts and lists so a payload like
+    ``{"params": {"password": "x"}}`` does not leak the password just because
+    the outer key is innocuous.
+    """
     if details is None:
         return None
     if isinstance(details, dict):
-        out = {}
+        out: Dict[str, Any] = {}
         for k, v in details.items():
             key = str(k).lower()
-            if any(
-                tag in key
-                for tag in ("password", "secret", "token", "apikey", "api_key")
-            ):
+            if any(tag in key for tag in _SECRET_KEY_TAGS):
                 out[k] = "***"
-            elif isinstance(v, str) and len(v) > 500:
-                out[k] = v[:500] + "…"
             else:
-                out[k] = v
+                out[k] = _sanitize_details(v)
         return out
-    if isinstance(details, str) and len(details) > _MAX_DETAIL_BYTES:
-        return details[:_MAX_DETAIL_BYTES] + "…"
+    if isinstance(details, list):
+        return [_sanitize_details(item) for item in details]
+    if isinstance(details, tuple):
+        return tuple(_sanitize_details(item) for item in details)
+    if isinstance(details, str) and len(details) > 500:
+        return details[:500] + "…"
     return details
 
 

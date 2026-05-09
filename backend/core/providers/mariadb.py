@@ -2,6 +2,10 @@
 
 from .mysql import MySQLProvider
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class MariaDBProvider(MySQLProvider):
     """

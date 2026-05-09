@@ -1,3 +1,9 @@
+# Direct (top-level) dependencies. Keep ranges loose here so future bumps
+# stay readable. Production builds DO NOT install from this file — they
+# install from requirements.lock, which pins every transitive dep to the
+# exact version that was resolved when the lock was last regenerated.
+# Regenerate the lock after editing this file (see header of requirements.lock).
+
 # Database (async SQLAlchemy + Alembic)
 sqlalchemy[asyncio]>=2.0
 aiosqlite

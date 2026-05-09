@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Optional, cast
 from core.storage_provider import StorageProvider
 from core.s3_storage import S3Storage
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class StorageManager:
     """
@@ -33,7 +37,7 @@ class StorageManager:
         if "s3_buckets" in self.config_manager.config:
             s3_buckets = self.config_manager.config.pop("s3_buckets")
             if s3_buckets and not self.config_manager.config["storage_targets"]:
-                print("🔄 Migrating legacy S3 buckets to storage targets...")
+                logger.info("🔄 Migrating legacy S3 buckets to storage targets...")
                 self.config_manager.config["storage_targets"] = s3_buckets
                 self.config_manager.save_config()
 
@@ -128,14 +132,14 @@ class StorageManager:
             # But let's assume we might migrate db configs too?
             # For now, let's just check s3_bucket_id (mapping to storage_id)
             if db.get("s3_bucket_id") == storage_id:
-                print(
+                logger.info(
                     f"❌ Cannot delete storage: in use by database '{db.get('name')}'"
                 )
                 return False
 
         # Check if storage is used for config sync
         if self.config_manager.config.get("config_sync_bucket_id") == storage_id:
-            print("❌ Cannot delete storage: used for config sync")
+            logger.info("❌ Cannot delete storage: used for config sync")
             return False
 
         # Remove storage
@@ -165,13 +169,13 @@ class StorageManager:
         """
         storage = self.get_storage(storage_id)
         if not storage:
-            print(f"❌ Storage ID {storage_id} not found or failed to initialize")
+            logger.info(f"❌ Storage ID {storage_id} not found or failed to initialize")
             return False
 
         try:
             return storage.test_connection()
         except Exception as e:
-            print(f"❌ Connection test failed: {e}")
+            logger.info(f"❌ Connection test failed: {e}")
             return False
 
     def get_storage(self, storage_id: int) -> Optional[StorageProvider]:
@@ -201,13 +205,13 @@ class StorageManager:
 
                     return SMBStorage(config)
                 except ImportError:
-                    print("⚠️  SMB support not available. Install smbprotocol.")
+                    logger.info("⚠️  SMB support not available. Install smbprotocol.")
                     return None
             else:
-                print(f"❌ Unknown storage provider: {provider_type}")
+                logger.info(f"❌ Unknown storage provider: {provider_type}")
                 return None
         except Exception as e:
-            print(f"❌ Failed to create storage provider: {e}")
+            logger.info(f"❌ Failed to create storage provider: {e}")
             return None
 
     def get_storage_name(self, storage_id: int) -> Optional[str]:

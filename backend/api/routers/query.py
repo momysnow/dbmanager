@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from api.dependencies import get_config_manager, get_db_manager
 from api.deps import get_current_user, require_role
 from config import ConfigManager
-from core.manager import DBManager
+from core.manager import DBManager, QueryResultTooLargeError, QueryTimeoutError
 from db.models.user import User
 
 router = APIRouter()
@@ -192,18 +192,49 @@ async def execute_query(
             db_manager.execute_query, database_id, query, limit=limit
         )
         return result
-    except Exception as e:
-        logger.exception(
-            "Query execution failed for db=%s user=%s",
+    except QueryTimeoutError:
+        # Don't logger.exception — timeouts are a routine user-input outcome,
+        # not an internal failure worth a stack trace per occurrence.
+        logger.warning(
+            "Query timeout db=%s user=%s",
             database_id,
             current_user.username,
         )
-        # Admins get the raw error to debug; others get a generic message.
-        detail = (
-            f"Query execution failed: {str(e)}"
-            if current_user.role == "admin"
-            else "Query execution failed"
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Query exceeded the configured timeout.",
         )
+    except QueryResultTooLargeError:
+        logger.warning(
+            "Query result too large db=%s user=%s",
+            database_id,
+            current_user.username,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                "Result set exceeds server limit. Narrow the query or "
+                "lower the limit."
+            ),
+        )
+    except Exception as e:
+        # Stack traces in centralised log stores can leak internal schema
+        # details to ops with broader access than the requesting user. Only
+        # admins (who can already see the schema) get the full trace.
+        if current_user.role == "admin":
+            logger.exception(
+                "Query execution failed for db=%s user=%s",
+                database_id,
+                current_user.username,
+            )
+            detail = f"Query execution failed: {str(e)}"
+        else:
+            logger.warning(
+                "Query execution failed db=%s user=%s",
+                database_id,
+                current_user.username,
+            )
+            detail = "Query execution failed"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=detail,
@@ -219,6 +250,7 @@ async def list_tables(
     database_id: int,
     db_manager: DBManager = Depends(get_db_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    current_user: User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     db_config = config_manager.get_database(database_id)
     if not db_config:
@@ -229,9 +261,23 @@ async def list_tables(
     try:
         return await _run_blocking(db_manager.list_tables, database_id)
     except Exception as e:
+        if current_user.role == "admin":
+            logger.exception(
+                "list_tables failed for db=%s user=%s",
+                database_id,
+                current_user.username,
+            )
+            detail = f"Failed to list tables: {str(e)}"
+        else:
+            logger.warning(
+                "list_tables failed db=%s user=%s",
+                database_id,
+                current_user.username,
+            )
+            detail = "Failed to list tables"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list tables: {str(e)}",
+            detail=detail,
         )
 
 
@@ -244,6 +290,7 @@ async def get_database_schema(
     database_id: int,
     db_manager: DBManager = Depends(get_db_manager),
     config_manager: ConfigManager = Depends(get_config_manager),
+    current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     db_config = config_manager.get_database(database_id)
     if not db_config:
@@ -254,9 +301,23 @@ async def get_database_schema(
     try:
         return await _run_blocking(db_manager.get_database_schema, database_id)
     except Exception as e:
+        if current_user.role == "admin":
+            logger.exception(
+                "get_database_schema failed for db=%s user=%s",
+                database_id,
+                current_user.username,
+            )
+            detail = f"Failed to get database schema: {str(e)}"
+        else:
+            logger.warning(
+                "get_database_schema failed db=%s user=%s",
+                database_id,
+                current_user.username,
+            )
+            detail = "Failed to get database schema"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get database schema: {str(e)}",
+            detail=detail,
         )
 
 

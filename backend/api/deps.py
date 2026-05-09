@@ -1,5 +1,5 @@
 import os
-from typing import AsyncGenerator, Callable, List
+from typing import AsyncGenerator, Callable, List, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
@@ -14,7 +14,14 @@ from db.repositories.users_repo import get_user_by_username
 config_manager = ConfigManager()
 auth_manager = AuthManager(config_manager)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+# Name of the httpOnly session cookie. Kept in sync with the frontend.
+COOKIE_NAME = "dbmanager_session"
+
+# auto_error=False: we resolve the token ourselves so we can fall back to the
+# httpOnly cookie when the Authorization header is missing.
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/token", auto_error=False
+)
 
 # Endpoints that remain reachable while must_change_password is set.
 _PW_CHANGE_ALLOWLIST = {
@@ -23,10 +30,15 @@ _PW_CHANGE_ALLOWLIST = {
     "/api/v1/auth/logout",
 }
 
+# State-changing methods need stricter CSRF protection than SameSite=Strict
+# alone. We require a custom header that browsers refuse to set on cross-site
+# requests without a CORS preflight, and our CORS allow-list is explicit.
+_STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
+
 
 async def get_current_user(
     request: Request,
-    token: str = Depends(oauth2_scheme),
+    token: Optional[str] = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     credentials_exception = HTTPException(
@@ -35,7 +47,28 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    payload = auth_manager.decode_token(token)
+    cookie_token = request.cookies.get(COOKIE_NAME)
+    # CSRF: when authenticating via cookie on a state-changing request,
+    # require the X-Requested-With header. Browsers will not set this on a
+    # cross-origin <form> POST and our CORS config forbids the header from
+    # untrusted origins via preflight.
+    if (
+        cookie_token
+        and not token
+        and request.method in _STATE_CHANGING
+        and request.headers.get("x-requested-with", "").lower()
+        != "xmlhttprequest"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Missing X-Requested-With header (CSRF protection)",
+        )
+
+    effective_token = token or cookie_token
+    if not effective_token:
+        raise credentials_exception
+
+    payload = auth_manager.decode_token(effective_token)
     if payload is None:
         raise credentials_exception
 

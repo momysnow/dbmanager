@@ -1,5 +1,6 @@
 """Structured logging configuration for DBManager"""
 
+import contextvars
 import json
 import logging
 import sys
@@ -7,6 +8,22 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
+
+
+# Per-request correlation ID. The HTTP middleware sets this when a request
+# starts; loggers pick it up through the RequestIdFilter below so every line
+# emitted while handling that request carries the same id.
+request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-"
+)
+
+
+class RequestIdFilter(logging.Filter):
+    """Inject the active request_id into every LogRecord."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
+        record.request_id = request_id_ctx.get()
+        return True
 
 # Log directory
 LOG_DIR = Path.home() / ".dbmanager" / "logs"
@@ -30,6 +47,7 @@ class JSONFormatter(logging.Formatter):
             "module": record.module,
             "function": record.funcName,
             "line": record.lineno,
+            "request_id": getattr(record, "request_id", "-"),
         }
 
         # Add exception info if present
@@ -81,6 +99,10 @@ def setup_logger(
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper()))
     logger.handlers = []  # Clear existing handlers
+    # Attach the request-id filter once. setup_logger may be called many
+    # times during boot, so guard against duplicate filters.
+    if not any(isinstance(f, RequestIdFilter) for f in logger.filters):
+        logger.addFilter(RequestIdFilter())
 
     # File handler with rotation
     if log_file is None:

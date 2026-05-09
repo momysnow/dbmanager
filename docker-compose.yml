@@ -1,20 +1,68 @@
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "5"
+
 services:
+  # Restricted Docker API proxy — backend talks to this instead of the raw
+  # docker.sock. Allowlist limits API surface to what the backend actually
+  # needs: list/inspect/exec containers and copy files in/out of containers.
+  # See https://github.com/Tecnativa/docker-socket-proxy
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: dbmanager-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      EXEC: 1
+      POST: 1
+      # Everything else stays denied (default 0): no images/networks/volumes/swarm/services.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - default
+    logging: *default-logging
+    mem_limit: 128m
+    cpus: 0.25
+    # docker-socket-proxy is just a port-forwarder + endpoint filter; it
+    # never needs to gain privileges or escape the container.
+    security_opt:
+      - no-new-privileges:true
+
   backend:
     build: ./backend
     container_name: dbmanager-backend
+    # Compose runs an init shim (tini-like) as PID 1. Without it, SIGTERM
+    # from `docker stop` lands on the bash entrypoint, which never forwards
+    # it to uvicorn — the lifespan shutdown handler does not run, and any
+    # in-flight backup is killed mid-write.
+    init: true
     volumes:
       - ./backend:/app
       - ./backend/data:/app/data
       - ./caddy:/etc/dbmanager/caddy
-      - /var/run/docker.sock:/var/run/docker.sock # Docker API access
+      # Caddy admin API surface. Shared with the caddy container ONLY — the
+      # frontend and docker-proxy do not mount this volume, so they cannot
+      # reach admin even though they share the Docker bridge. Replaces the
+      # earlier TCP :2019 binding which was reachable network-wide.
+      - caddy_admin_sock:/run/caddy-admin
     expose:
       - "8000"
+    depends_on:
+      - docker-proxy
     environment:
+      # Docker API via restricted proxy (no raw socket mount).
+      - DOCKER_HOST=tcp://docker-proxy:2375
       - DBMANAGER_DATA_DIR=/app/data
       - DBMANAGER_CREATE_ADMIN=${DBMANAGER_CREATE_ADMIN:-true}
       - DBMANAGER_ADMIN_USER=${DBMANAGER_ADMIN_USER:-admin}
-      - DBMANAGER_ADMIN_PASSWORD=${DBMANAGER_ADMIN_PASSWORD:-admin}
-      - DBMANAGER_JWT_SECRET=${DBMANAGER_JWT_SECRET:-}
+      # REQUIRED. No fallback — backend refuses to boot if missing or set
+      # to a known placeholder (admin/admin, change-me, …). Set in .env or
+      # your deployment platform's secret store. See backend/.env.example.
+      - DBMANAGER_ADMIN_PASSWORD=${DBMANAGER_ADMIN_PASSWORD:?missing — set a strong password in .env}
+      # REQUIRED. 32+ random chars (e.g. python -c "import secrets; print(secrets.token_urlsafe(48))").
+      - DBMANAGER_JWT_SECRET=${DBMANAGER_JWT_SECRET:?missing — set a 32+ char random string in .env}
       - DBMANAGER_MASTER_KEY=${DBMANAGER_MASTER_KEY:-}
       - DBMANAGER_ENABLE_CLI=${DBMANAGER_ENABLE_CLI:-false}
       # CORS: comma-separated list of allowed origins (leave empty for localhost defaults)
@@ -29,7 +77,7 @@ services:
       - DBMANAGER_PROXY_CERT_PATH=${DBMANAGER_PROXY_CERT_PATH:-}
       - DBMANAGER_PROXY_KEY_PATH=${DBMANAGER_PROXY_KEY_PATH:-}
       - DBMANAGER_PROXY_NONINTERACTIVE=${DBMANAGER_PROXY_NONINTERACTIVE:-true}
-      - DBMANAGER_PROXY_ADMIN_URL=http://caddy:2019
+      - DBMANAGER_PROXY_ADMIN_URL=unix:///run/caddy-admin/admin.sock
       - DBMANAGER_PROXY_CADDY_CONTAINER=dbmanager-caddy
       # DNS provider credentials (only the one you use is needed)
       - CF_API_TOKEN=${CF_API_TOKEN:-}
@@ -40,15 +88,31 @@ services:
       - GANDI_API_TOKEN=${GANDI_API_TOKEN:-}
       - DUCKDNS_API_TOKEN=${DUCKDNS_API_TOKEN:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 2g
+    cpus: 2.0
+    stop_grace_period: 30s
+    # Backend must keep root + cron capabilities (cron daemon, ODBC drivers,
+    # mssql-tools18 install path). What we *can* tighten is no-new-privileges
+    # so a setuid binary in a malicious dependency can't elevate further.
+    # Once cron moves to APScheduler (M11) we can also drop ALL capabilities
+    # and switch to a non-root UID.
+    security_opt:
+      - no-new-privileges:true
 
   frontend:
-    build: ./frontend
+    # Default compose still targets the dev image (vite + bind mount). The
+    # prod-ready multi-stage nginx image lives in ./frontend/Dockerfile and
+    # is selected by docker-compose.prod.yml (see M5 in the audit plan).
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
     container_name: dbmanager-frontend
     expose:
       - "5173"
@@ -67,6 +131,15 @@ services:
       retries: 5
       start_period: 20s
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
+    # Both the dev (Vite) and prod (nginx) frontend images run as a non-root
+    # user already; we forbid privilege escalation but cannot cap_drop ALL
+    # because nginx-prod needs CHOWN / SETGID / SETUID to drop privileges
+    # off PID 1 at startup, plus DAC_OVERRIDE for /var/cache/nginx.
+    security_opt:
+      - no-new-privileges:true
 
   caddy:
     build: ./caddy
@@ -75,24 +148,59 @@ services:
       - "${DBMANAGER_PROXY_HTTP_PORT:-80}:80"
       - "${DBMANAGER_PROXY_HTTPS_PORT:-443}:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      # Admin-API unix socket shared with the backend only.
+      - caddy_admin_sock:/run/caddy-admin
     environment:
       - DBMANAGER_PROXY_ACME_EMAIL=${DBMANAGER_PROXY_ACME_EMAIL:-}
       - DBMANAGER_PROXY_DOMAIN=${DBMANAGER_PROXY_DOMAIN:-}
+      # DNS provider tokens — pass EITHER the plaintext value OR a path to a
+      # mounted secret file via the `_FILE` variant. The caddy entrypoint
+      # resolves `${NAME}_FILE` → file contents → env, so Caddy's
+      # `{env.NAME}` interpolation works in both modes. The plaintext form is
+      # fine for single-host installs but is visible in `docker inspect`;
+      # prefer the `_FILE` form in shared / multi-tenant environments.
       - CF_API_TOKEN=${CF_API_TOKEN:-}
+      - CF_API_TOKEN_FILE=${CF_API_TOKEN_FILE:-}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_ACCESS_KEY_ID_FILE=${AWS_ACCESS_KEY_ID_FILE:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SECRET_ACCESS_KEY_FILE=${AWS_SECRET_ACCESS_KEY_FILE:-}
       - AWS_REGION=${AWS_REGION:-}
       - DO_AUTH_TOKEN=${DO_AUTH_TOKEN:-}
+      - DO_AUTH_TOKEN_FILE=${DO_AUTH_TOKEN_FILE:-}
       - GANDI_API_TOKEN=${GANDI_API_TOKEN:-}
+      - GANDI_API_TOKEN_FILE=${GANDI_API_TOKEN_FILE:-}
       - DUCKDNS_API_TOKEN=${DUCKDNS_API_TOKEN:-}
+      - DUCKDNS_API_TOKEN_FILE=${DUCKDNS_API_TOKEN_FILE:-}
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 512m
+    cpus: 1.0
+    # Caddy needs NET_BIND_SERVICE to listen on :80/:443 even as root, plus
+    # CHOWN/SETGID/SETUID for its internal cap-dropping at startup. Drop the
+    # rest of the default cap set.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
 
 volumes:
   caddy_data:
   caddy_config:
+  # Bridge between the caddy and backend containers for the admin-API unix
+  # socket. Bind-mounting this from the host is intentionally avoided so the
+  # socket lives on the Docker volume layer and isn't reachable to other host
+  # processes either.
+  caddy_admin_sock:

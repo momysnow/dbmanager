@@ -6,8 +6,8 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import axios from "axios";
-import { TOKEN_KEY, AUTH_LOGOUT_EVENT } from "@/lib/constants";
+import api, { authApi } from "@/services/api";
+import { AUTH_LOGOUT_EVENT } from "@/lib/constants";
 
 export type UserRole = "admin" | "operator" | "viewer";
 
@@ -21,24 +21,25 @@ export interface CurrentUser {
 }
 
 interface AuthContextType {
-  accessToken: string | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
   user: CurrentUser | null;
   role: UserRole | null;
   hasRole: (roles: UserRole[]) => boolean;
   login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [accessToken, setAccessToken] = useState<string | null>(() =>
-    localStorage.getItem(TOKEN_KEY),
-  );
   const [user, setUser] = useState<CurrentUser | null>(null);
+  // Auth is unknown until the first /me probe completes — gate protected
+  // routes on isLoading so we don't briefly flash the authenticated UI to a
+  // logged-out user (or vice versa).
+  const [isLoading, setIsLoading] = useState(true);
 
-  const isAuthenticated = !!accessToken;
+  const isAuthenticated = !!user;
   const role = user?.role ?? null;
 
   const hasRole = useCallback(
@@ -46,53 +47,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [role],
   );
 
-  const fetchMe = useCallback(async (token: string) => {
+  const fetchMe = useCallback(async () => {
     try {
-      const res = await axios.get<CurrentUser>("/api/v1/auth/me", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setUser(res.data);
+      const res = await authApi.me();
+      setUser(res.data as CurrentUser);
     } catch {
       setUser(null);
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (accessToken) {
-      fetchMe(accessToken);
-    } else {
-      setUser(null);
+    fetchMe();
+  }, [fetchMe]);
+
+  const login = useCallback(
+    async (username: string, password: string) => {
+      const params = new URLSearchParams();
+      params.append("username", username);
+      params.append("password", password);
+
+      // Cookie is set by the backend on success; nothing to store client-side.
+      await api.post("/auth/token", params, {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      });
+      await fetchMe();
+    },
+    [fetchMe],
+  );
+
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Ignore — even if the backend call fails we still clear local state.
     }
-  }, [accessToken, fetchMe]);
-
-  const login = useCallback(async (username: string, password: string) => {
-    const params = new URLSearchParams();
-    params.append("username", username);
-    params.append("password", password);
-
-    const response = await axios.post("/api/v1/auth/token", params, {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-
-    const token = response.data.access_token;
-    localStorage.setItem(TOKEN_KEY, token);
-    setAccessToken(token);
-  }, []);
-
-  const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
-    setAccessToken(null);
     setUser(null);
   }, []);
 
   useEffect(() => {
-    window.addEventListener(AUTH_LOGOUT_EVENT, logout);
-    return () => window.removeEventListener(AUTH_LOGOUT_EVENT, logout);
-  }, [logout]);
+    const handler = () => {
+      setUser(null);
+    };
+    window.addEventListener(AUTH_LOGOUT_EVENT, handler);
+    return () => window.removeEventListener(AUTH_LOGOUT_EVENT, handler);
+  }, []);
 
   return (
     <AuthContext.Provider
-      value={{ accessToken, isAuthenticated, user, role, hasRole, login, logout }}
+      value={{ isAuthenticated, isLoading, user, role, hasRole, login, logout }}
     >
       {children}
     </AuthContext.Provider>

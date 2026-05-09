@@ -7,6 +7,10 @@ from typing import Any, Callable, Dict, Optional
 from config import ConfigManager
 from core.notifications import NotificationManager
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class UptimeMonitor:
     def __init__(
@@ -36,7 +40,7 @@ class UptimeMonitor:
             try:
                 self._ping_all()
             except Exception as e:
-                print(f"[uptime-monitor] error: {e}")
+                logger.info(f"[uptime-monitor] error: {e}")
             settings = self._config.get_ping_settings()
             interval = int(settings.get("interval_minutes", 5)) * 60
             self._stop_event.wait(timeout=interval)

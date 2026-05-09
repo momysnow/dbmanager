@@ -7,6 +7,10 @@ from typing import Optional
 from ..progress import BackupProgress
 from .base import BaseProvider
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class MongoDBProvider(BaseProvider):
     """MongoDB backup and restore provider using mongodump/mongorestore"""
@@ -55,7 +59,7 @@ class MongoDBProvider(BaseProvider):
 
             return result.returncode == 0
         except Exception as e:
-            print(f"Connection test failed: {e}")
+            logger.info(f"Connection test failed: {e}")
             return False
 
     def test_connection(self) -> bool:

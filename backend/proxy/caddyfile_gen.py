@@ -17,7 +17,15 @@ _DNS_DIRECTIVE = {
 
 
 def _global_block(cfg: ProxyConfig) -> str:
-    lines = ["{", "    admin 0.0.0.0:2019"]
+    # Admin API on a unix socket only — never TCP. The socket is in a volume
+    # mounted only into the backend container, so other containers on the same
+    # Docker bridge cannot reach it. A TCP bind here would be reachable by any
+    # sibling container; the `origins` directive only filters the HTTP Host
+    # header, not source IP.
+    lines = [
+        "{",
+        "    admin unix//run/caddy-admin/admin.sock",
+    ]
     if (
         cfg.mode == ProxyMode.HTTPS
         and cfg.acme.email
@@ -49,6 +57,22 @@ def _tls_block(cfg: ProxyConfig) -> str:
     return ""
 
 
+_SECURITY_HEADERS_BLOCK = (
+    # Defence-in-depth headers applied to every response (API + SPA shell).
+    # Mirrors the static Caddyfile for parity between the bootstrap config
+    # and the dynamically rendered one used after the wizard runs.
+    "    header {\n"
+    "        X-Content-Type-Options nosniff\n"
+    "        X-Frame-Options DENY\n"
+    "        Referrer-Policy strict-origin-when-cross-origin\n"
+    "        Permissions-Policy \"accelerometer=(), camera=(), geolocation=(), "
+    "gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()\"\n"
+    "        Strict-Transport-Security \"max-age=31536000; includeSubDomains\"\n"
+    "        -Server\n"
+    "    }"
+)
+
+
 def _site_block(cfg: ProxyConfig) -> str:
     if cfg.mode == ProxyMode.HTTP:
         site_addr = f"http://{cfg.domain}"
@@ -59,6 +83,7 @@ def _site_block(cfg: ProxyConfig) -> str:
 
     parts = [
         f"{site_addr} {{",
+        _SECURITY_HEADERS_BLOCK,
         f"    handle {backend_prefix}/* {{",
         f"        reverse_proxy {cfg.routes.backend_upstream}",
         "    }",
@@ -76,9 +101,15 @@ def _site_block(cfg: ProxyConfig) -> str:
 def render_caddyfile(cfg: ProxyConfig) -> str:
     """Produce the textual Caddyfile content."""
     if not cfg.enabled or cfg.mode == ProxyMode.DISABLED:
-        # Keep Caddy alive with a placeholder responder so admin API stays up.
+        # Keep Caddy alive with a placeholder responder so the admin API
+        # stays up. Same unix-socket admin binding as the active config — a
+        # TCP admin here would be reachable by sibling containers on the
+        # same Docker bridge.
         return (
-            "{\n    admin 0.0.0.0:2019\n    auto_https off\n}\n\n"
+            "{\n"
+            "    admin unix//run/caddy-admin/admin.sock\n"
+            "    auto_https off\n"
+            "}\n\n"
             ':80 {\n    respond "DBManager proxy disabled" 503\n}\n'
         )
 

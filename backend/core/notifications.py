@@ -1,13 +1,78 @@
 """Notification system for backup events"""
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, cast
-from enum import Enum
+import ipaddress
+import json
+import logging
+import os
+import socket
 import smtplib
+from abc import ABC, abstractmethod
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from enum import Enum
+from typing import Any, Dict, List, Optional, cast
+from urllib.parse import urlparse
+
 import requests
-import json
+
+
+logger = logging.getLogger(__name__)
+
+
+def _is_private_or_local_ip(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True  # Refuse unparseable hosts.
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+    )
+
+
+def _assert_safe_webhook_url(url: str) -> None:
+    """Refuse webhook URLs that resolve to internal/loopback/link-local IPs.
+
+    Mitigates SSRF: an admin who can configure a webhook URL must not be able
+    to make the API call internal services (cloud metadata, k8s API, etc.).
+    Set DBMANAGER_ALLOW_INTERNAL_WEBHOOKS=1 to bypass for trusted dev setups.
+    """
+    if os.getenv("DBMANAGER_ALLOW_INTERNAL_WEBHOOKS", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:
+        raise ValueError(f"Invalid webhook URL: {exc}") from exc
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Webhook URL must be http(s), got {parsed.scheme!r}")
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Webhook URL missing host")
+
+    # Resolve and check every address (DNS rebinding-resistant).
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"Webhook host {host!r} did not resolve: {exc}") from exc
+
+    for info in infos:
+        ip = info[4][0]
+        if _is_private_or_local_ip(ip):
+            raise ValueError(
+                f"Webhook URL host {host!r} resolves to a non-public IP "
+                f"({ip}); refused for SSRF protection."
+            )
 
 
 class NotificationType(Enum):
@@ -115,7 +180,7 @@ class EmailNotifier(BaseNotifier):
 
             return True
         except Exception as e:
-            print(f"Email notification failed: {e}")
+            logger.info(f"Email notification failed: {e}")
             return False
 
 
@@ -183,17 +248,19 @@ class SlackNotifier(BaseNotifier):
             webhook_url = self.config.get("webhook_url")
             if not isinstance(webhook_url, str) or not webhook_url:
                 raise ValueError("Slack webhook URL not configured")
+            _assert_safe_webhook_url(webhook_url)
 
             # Send to webhook
             response = requests.post(
                 webhook_url,
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
+                timeout=10,
             )
 
             return response.status_code == 200
         except Exception as e:
-            print(f"Slack notification failed: {e}")
+            logger.warning("Slack notification failed: %s", e)
             return False
 
 
@@ -248,17 +315,19 @@ class TeamsNotifier(BaseNotifier):
             webhook_url = self.config.get("webhook_url")
             if not isinstance(webhook_url, str) or not webhook_url:
                 raise ValueError("Teams webhook URL not configured")
+            _assert_safe_webhook_url(webhook_url)
 
             # Send to webhook
             response = requests.post(
                 webhook_url,
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
+                timeout=10,
             )
 
             return response.status_code == 200
         except Exception as e:
-            print(f"Teams notification failed: {e}")
+            logger.warning("Teams notification failed: %s", e)
             return False
 
 
@@ -328,17 +397,19 @@ class DiscordNotifier(BaseNotifier):
             webhook_url = self.config.get("webhook_url")
             if not isinstance(webhook_url, str) or not webhook_url:
                 raise ValueError("Discord webhook URL not configured")
+            _assert_safe_webhook_url(webhook_url)
 
             # Send to webhook
             response = requests.post(
                 webhook_url,
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
+                timeout=10,
             )
 
             return response.status_code in [200, 204]
         except Exception as e:
-            print(f"Discord notification failed: {e}")
+            logger.info(f"Discord notification failed: {e}")
             return False
 
 
@@ -379,7 +450,7 @@ class NotificationManager:
                     result = notifier.send(notification_type, title, message, **kwargs)
                     results.append(result)
                 except Exception as e:
-                    print(f"Notification error ({notifier.__class__.__name__}): {e}")
+                    logger.info(f"Notification error ({notifier.__class__.__name__}): {e}")
                     results.append(False)
 
         return any(results) if results else False

@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -5,6 +7,34 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 from config import ConfigManager, CONFIG_DIR
 from .providers.base import BaseProvider
+
+logger = logging.getLogger(__name__)
+
+
+class QueryTimeoutError(Exception):
+    """Raised when an ad-hoc query exceeds DBMANAGER_QUERY_TIMEOUT_MS."""
+
+
+class QueryResultTooLargeError(Exception):
+    """Raised when serialised results exceed DBMANAGER_QUERY_RESULT_MAX_BYTES."""
+
+
+def _query_timeout_ms() -> int:
+    raw = os.getenv("DBMANAGER_QUERY_TIMEOUT_MS", "30000").strip()
+    try:
+        v = int(raw)
+    except ValueError:
+        v = 30000
+    return max(1000, min(v, 600000))  # clamp 1s..10min
+
+
+def _query_result_max_bytes() -> int:
+    raw = os.getenv("DBMANAGER_QUERY_RESULT_MAX_BYTES", "52428800").strip()
+    try:
+        v = int(raw)
+    except ValueError:
+        v = 52428800  # 50 MiB
+    return max(1024, v)
 from .providers.postgres import PostgresProvider
 from .providers.mysql import MySQLProvider
 from .providers.sqlserver import SQLServerProvider
@@ -141,23 +171,23 @@ class DBManager:
         if bucket_changed and result:
             assert old_bucket_id is not None
             assert s3_bucket_id is not None
-            print("\n⚠️  Storage target changed - migration required")
+            logger.info("\n⚠️  Storage target changed - migration required")
             from .storage_migrator import StorageMigrator
 
             migrator = StorageMigrator(self.storage_manager)
 
             # Ask user for confirmation
-            print(
+            logger.info(
                 f"   Old storage: "
                 f"{self.storage_manager.get_storage_name(old_bucket_id)}"
             )
-            print(
+            logger.info(
                 f"   New storage: {self.storage_manager.get_storage_name(s3_bucket_id)}"
             )
 
             # Estimate migration size
             estimate = migrator.estimate_migration_size(db_id, old_bucket_id)
-            print(
+            logger.info(
                 f"   Backups to migrate: {estimate['count']} ({estimate['size_mb']} MB)"
             )
 
@@ -176,11 +206,11 @@ class DBManager:
                 )
 
                 if delete_old:
-                    print("   ✅ Migration complete - old backups deleted")
+                    logger.info("   ✅ Migration complete - old backups deleted")
                 else:
-                    print("   ✅ Migration complete - old backups preserved")
+                    logger.info("   ✅ Migration complete - old backups preserved")
             else:
-                print("   ⚠️  Migration skipped - backups remain in old bucket")
+                logger.info("   ⚠️  Migration skipped - backups remain in old bucket")
 
         return result
 
@@ -241,16 +271,16 @@ class DBManager:
                 new_path = os.path.join(directory, new_filename)
                 os.rename(path, new_path)
                 path = new_path
-                print(f"🏷️  Tagged backup: {new_filename}")
+                logger.info(f"🏷️  Tagged backup: {new_filename}")
             except Exception as e:
-                print(f"⚠️  Failed to tag backup: {e}")
+                logger.info(f"⚠️  Failed to tag backup: {e}")
 
         # Generate checksum for backup integrity
         try:
             checksum_file = save_checksum(path)
-            print(f"✅ Checksum generated: {os.path.basename(checksum_file)}")
+            logger.info(f"✅ Checksum generated: {os.path.basename(checksum_file)}")
         except Exception as e:
-            print(f"⚠️  Checksum generation failed: {e}")
+            logger.info(f"⚠️  Checksum generation failed: {e}")
             checksum_file = None
 
         # Compress backup if enabled
@@ -260,7 +290,7 @@ class DBManager:
                 algorithm = compression_settings.get("algorithm", "gzip")
                 level = compression_settings.get("level", 6)
 
-                print(f"🗜️  Compressing with {algorithm} (level {level})...")
+                logger.info(f"🗜️  Compressing with {algorithm} (level {level})...")
                 original_size = os.path.getsize(path)
                 compressed_path = compress_file(
                     path, algorithm=algorithm, level=level, remove_original=True
@@ -279,26 +309,26 @@ class DBManager:
 
                 if original_size:
                     ratio = os.path.getsize(compressed_path) / original_size
-                    print(
+                    logger.info(
                         f"✅ Compressed: {os.path.basename(compressed_path)} "
                         f"({ratio:.2%} of original)"
                     )
                 else:
-                    print(f"✅ Compressed: {os.path.basename(compressed_path)}")
+                    logger.info(f"✅ Compressed: {os.path.basename(compressed_path)}")
             except Exception as e:
-                print(f"⚠️  Compression failed: {e}, using uncompressed backup")
+                logger.info(f"⚠️  Compression failed: {e}, using uncompressed backup")
 
         # Encrypt backup if enabled
         encryption_settings = self.config_manager.get_encryption_settings()
         if encryption_settings.get("enabled", False):
             password = encryption_settings.get("password")
             if not password:
-                print(
+                logger.info(
                     "⚠️  Encryption enabled but no password set, " "skipping encryption"
                 )
             else:
                 try:
-                    print("🔐 Encrypting backup...")
+                    logger.info("🔐 Encrypting backup...")
                     encrypted_path = encrypt_file(path, password, remove_original=True)
 
                     # Update path to encrypted file
@@ -315,9 +345,9 @@ class DBManager:
                             # If rename fails, regenerate checksum for encrypted file
                             checksum_file = save_checksum(encrypted_path)
 
-                    print(f"✅ Encrypted: {os.path.basename(encrypted_path)}")
+                    logger.info(f"✅ Encrypted: {os.path.basename(encrypted_path)}")
                 except Exception as e:
-                    print(f"⚠️  Encryption failed: {e}, using unencrypted backup")
+                    logger.info(f"⚠️  Encryption failed: {e}, using unencrypted backup")
 
         # Upload to Storage targets (supports multiple)
         # New field: storage_target_ids (list of ints)
@@ -336,7 +366,7 @@ class DBManager:
             try:
                 storage = self.storage_manager.get_storage(int(target_id))
                 if not storage:
-                    print(f"⚠️  Storage target {target_id} not found, skipping")
+                    logger.info(f"⚠️  Storage target {target_id} not found, skipping")
                     continue
 
                 target_name = self.storage_manager.get_storage_name(
@@ -365,15 +395,15 @@ class DBManager:
                 }
 
                 if storage.upload_file(path, remote_key, metadata):
-                    print(f"✅ Uploaded to [{target_name}]: {remote_key}")
+                    logger.info(f"✅ Uploaded to [{target_name}]: {remote_key}")
 
                     # Upload checksum too
                     if checksum_file and Path(checksum_file).exists():
                         storage.upload_file(checksum_file, f"{remote_key}.sha256")
                 else:
-                    print(f"⚠️  Upload to [{target_name}] failed")
+                    logger.info(f"⚠️  Upload to [{target_name}] failed")
             except Exception as e:
-                print(f"⚠️  Upload to storage {target_id} error: {e}")
+                logger.info(f"⚠️  Upload to storage {target_id} error: {e}")
 
         # Handle local retention
         if retention > 0:
@@ -441,11 +471,11 @@ class DBManager:
                     try:
                         storage.delete_file(backup["key"])
                         storage.delete_file(f"{backup['key']}.sha256")
-                        print(f"🗑️ Deleted old S3 backup: {backup['key']}")
+                        logger.info(f"🗑️ Deleted old S3 backup: {backup['key']}")
                     except Exception as e:
-                        print(f"⚠️ Failed to delete S3 backup {backup['key']}: {e}")
+                        logger.info(f"⚠️ Failed to delete S3 backup {backup['key']}: {e}")
         except Exception as e:
-            print(f"⚠️ S3 retention cleanup failed: {e}")
+            logger.info(f"⚠️ S3 retention cleanup failed: {e}")
 
     def list_backups(self, db_id: int) -> List[Dict[str, Any]]:
         backups = []
@@ -484,7 +514,7 @@ class DBManager:
                             }
                         )
                     except Exception as e:
-                        print(f"Error reading local backup {f}: {e}")
+                        logger.info(f"Error reading local backup {f}: {e}")
 
         # 2. S3 BACKUPS
         try:
@@ -531,7 +561,7 @@ class DBManager:
                             }
                         )
         except Exception as e:
-            print(f"Error listing S3 backups: {e}")
+            logger.info(f"Error listing S3 backups: {e}")
 
         # Sort by date desc
         return sorted(backups, key=lambda x: x["date"], reverse=True)
@@ -695,12 +725,12 @@ class DBManager:
                         expected_hash = parts[0]
                         expected_filename = parts[1]
             except Exception as e:
-                print(f"⚠️  Could not read checksum file: {e}")
+                logger.info(f"⚠️  Could not read checksum file: {e}")
 
         # SAFETY SNAPSHOT
         safety_snapshot_path = None
         if create_safety_snapshot:
-            print("📸 Creating safety snapshot before restore...")
+            logger.info("📸 Creating safety snapshot before restore...")
             if progress:
                 progress.update(
                     message="Creating safety snapshot...", step="Safety Snapshot"
@@ -710,12 +740,12 @@ class DBManager:
                 safety_snapshot_path = self.backup_database(
                     db_id, tag="safety_snapshot"
                 )
-                print(
+                logger.info(
                     "✅ Safety snapshot created: "
                     f"{os.path.basename(safety_snapshot_path)}"
                 )
             except Exception as e:
-                print(f"⚠️  Failed to create safety snapshot: {e}")
+                logger.info(f"⚠️  Failed to create safety snapshot: {e}")
                 # We should probably abort restore if safety snapshot fails, to be safe.
                 raise RuntimeError(
                     f"Restore aborted: Could not create safety snapshot ({e})"
@@ -759,11 +789,11 @@ class DBManager:
                         )
                     work_file = decrypt_file(work_file, password, remove_encrypted=True)
                     decrypted_file = work_file  # Save for checksum verification
-                    print(f"🔓 Decrypted: {os.path.basename(work_file)}")
+                    logger.info(f"🔓 Decrypted: {os.path.basename(work_file)}")
 
                 # VERIFY CHECKSUM after decrypt (checksum is for compressed file, not encrypted)
                 if has_checksum and expected_hash and decrypted_file:
-                    print("🔍 Verifying backup integrity...")
+                    logger.info("🔍 Verifying backup integrity...")
                     if progress:
                         progress.update(
                             message="Verifying backup integrity...", step="Checksum"
@@ -774,13 +804,13 @@ class DBManager:
 
                         actual_hash = calculate_checksum(decrypted_file)
                         if actual_hash == expected_hash:
-                            print("✅ Checksum verified - backup is intact")
+                            logger.info("✅ Checksum verified - backup is intact")
                         else:
                             raise ValueError(
                                 f"Checksum mismatch: expected {expected_hash[:16]}..., got {actual_hash[:16]}..."
                             )
                     except Exception as e:
-                        print(f"⚠️  Checksum verification failed: {e}")
+                        logger.info(f"⚠️  Checksum verification failed: {e}")
                         raise RuntimeError(
                             f"Restore aborted: Checksum verification failed ({e})"
                         )
@@ -793,26 +823,26 @@ class DBManager:
                             message="Decompressing backup...", step="Decompressing"
                         )
                     work_file = decompress_file(work_file, remove_compressed=True)
-                    print(f"📦 Decompressed: {os.path.basename(work_file)}")
+                    logger.info(f"📦 Decompressed: {os.path.basename(work_file)}")
 
                 actual_restore_file = work_file
             else:
                 # No encryption/compression - verify checksum directly
                 if has_checksum:
-                    print("🔍 Verifying backup integrity...")
+                    logger.info("🔍 Verifying backup integrity...")
                     if progress:
                         progress.update(
                             message="Verifying backup integrity...", step="Checksum"
                         )
                     try:
                         if verify_checksum(backup_file):
-                            print("✅ Checksum verified - backup is intact")
+                            logger.info("✅ Checksum verified - backup is intact")
                         else:
                             raise ValueError(
                                 "Checksum verification failed - backup may be corrupted"
                             )
                     except Exception as e:
-                        print(f"⚠️  Checksum verification failed: {e}")
+                        logger.info(f"⚠️  Checksum verification failed: {e}")
                         raise RuntimeError(
                             f"Restore aborted: Checksum verification failed ({e})"
                         )
@@ -842,13 +872,13 @@ class DBManager:
 
                 _shutil.rmtree(temp_dir_obj, ignore_errors=True)
 
-            print(f"❌ RESTORE FAILED: {e}")
+            logger.info(f"❌ RESTORE FAILED: {e}")
             if progress:
                 progress.fail(f"Restore failed: {e}")
 
             # ROLLBACK LOGIC
             if safety_snapshot_path and os.path.exists(safety_snapshot_path):
-                print("🔄 Attempting ROLLBACK to safety snapshot...")
+                logger.info("🔄 Attempting ROLLBACK to safety snapshot...")
                 if progress:
                     progress.update(
                         message="Restoring from safety snapshot...", step="Rolling Back"
@@ -864,7 +894,7 @@ class DBManager:
                         "Restore failed, but database was successfully rolled back "
                         "to previous state."
                     )
-                    print(f"✅ {msg}")
+                    logger.info(f"✅ {msg}")
                     # Re-raise original error but with rollback info
                     raise RuntimeError(f"Restore failed: {e}. ROLLBACK SUCCESSFUL.")
                 except Exception as rollback_error:
@@ -873,7 +903,7 @@ class DBManager:
                         "Database may be in inconsistent state. "
                         f"({rollback_error})"
                     )
-                    print(f"⛔️ {msg}")
+                    logger.info(f"⛔️ {msg}")
                     raise RuntimeError(msg)
             else:
                 raise RuntimeError(
@@ -894,10 +924,10 @@ class DBManager:
 
         databases = self.list_databases()
         if not databases:
-            print("No databases configured.")
+            logger.info("No databases configured.")
             return {"success": [], "failed": []}
 
-        print(
+        logger.info(
             f"🚀 Starting backup for {len(databases)} databases "
             f"(Parallel: {max_workers})..."
         )
@@ -923,13 +953,13 @@ class DBManager:
                 try:
                     res = future.result()
                     if res["status"] == "success":
-                        print(f"✅ [{res['name']}] Backup completed.")
+                        logger.info(f"✅ [{res['name']}] Backup completed.")
                         results["success"].append(res)
                     else:
-                        print(f"❌ [{res['name']}] Backup failed: {res['error']}")
+                        logger.info(f"❌ [{res['name']}] Backup failed: {res['error']}")
                         results["failed"].append(res)
                 except Exception as exc:
-                    print(f"❌ [{db['name']}] Thread exception: {exc}")
+                    logger.info(f"❌ [{db['name']}] Thread exception: {exc}")
                     results["failed"].append(
                         {"id": db["id"], "name": db["name"], "error": str(exc)}
                     )
@@ -965,27 +995,44 @@ class DBManager:
         params = db_config["params"]
 
         start_time = time.time()
+        timeout_ms = _query_timeout_ms()
+        max_bytes = _query_result_max_bytes()
 
         if provider_type == "postgres":
             import psycopg2
+            from psycopg2 import errors as pg_errors
 
+            # `options` ships a server-side per-connection statement_timeout
+            # so a runaway query is killed by Postgres itself, not just the
+            # client. Connection-level timeout on top guards the TCP path.
             conn = psycopg2.connect(
                 host=params["host"],
                 port=params["port"],
                 user=params["user"],
                 password=params["password"],
                 dbname=params["database"],
+                connect_timeout=10,
+                options=f"-c statement_timeout={timeout_ms}",
             )
+            timeout_exc: tuple = (pg_errors.QueryCanceled,)
         elif provider_type in ("mysql", "mariadb"):
             import pymysql
+            from pymysql import err as pymysql_err
 
+            # MAX_EXECUTION_TIME is a SELECT-only optimizer hint in MySQL 5.7+
+            # / MariaDB 10.1+; for write paths the connection-level read
+            # timeout is the only available bound.
             conn = pymysql.connect(
                 host=params["host"],
                 port=int(params["port"]),
                 user=params["user"],
                 password=params["password"],
                 database=params["database"],
+                connect_timeout=10,
+                read_timeout=max(1, timeout_ms // 1000),
+                init_command=f"SET SESSION MAX_EXECUTION_TIME={timeout_ms}",
             )
+            timeout_exc = (pymysql_err.OperationalError,)
         else:
             raise ValueError(
                 f"Query execution not supported for provider: {provider_type}"
@@ -993,7 +1040,14 @@ class DBManager:
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query)
+            try:
+                cursor.execute(query)
+            except timeout_exc as exc:
+                # Convert provider-specific timeouts into a single exception
+                # the API router can map to HTTP 504.
+                raise QueryTimeoutError(
+                    f"Query exceeded {timeout_ms}ms timeout"
+                ) from exc
 
             # If the query mutates data, commit it
             conn.commit()
@@ -1009,14 +1063,31 @@ class DBManager:
                 # `rowcount` can signify rows affected in an UPDATE/DELETE/INSERT
                 row_count = cursor.rowcount if hasattr(cursor, "rowcount") else 0
 
-            execution_time_ms = int((time.time() - start_time) * 1000)
-
-            return {
+            result_payload: Dict[str, Any] = {
                 "columns": columns,
                 "rows": [list(row) for row in rows],
                 "row_count": row_count,
-                "execution_time_ms": execution_time_ms,
+                "execution_time_ms": int((time.time() - start_time) * 1000),
             }
+
+            # Cheap upper-bound check. We serialise once with `default=str`
+            # because the rows may contain datetime/Decimal/bytes that are
+            # not JSON-native; if the size is fine the caller will serialise
+            # again via FastAPI, which is acceptable overhead.
+            try:
+                payload_size = len(
+                    json.dumps(result_payload, default=str).encode("utf-8")
+                )
+            except (TypeError, ValueError):
+                # If we can't even serialise, treat as too large rather than
+                # leaking a partial response.
+                raise QueryResultTooLargeError("Result not JSON-serialisable")
+            if payload_size > max_bytes:
+                raise QueryResultTooLargeError(
+                    f"Result {payload_size} bytes exceeds cap {max_bytes}"
+                )
+
+            return result_payload
         finally:
             conn.close()
 

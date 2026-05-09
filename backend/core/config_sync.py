@@ -9,6 +9,10 @@ import shutil
 from datetime import datetime
 from typing import Any, Dict, Optional, cast
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ConfigSync:
     """
@@ -80,7 +84,7 @@ class ConfigSync:
             storage = self.storage_manager.get_storage(target_id)
             if not storage:
                 if not silent:
-                    print("⚠️ Failed to get storage for config sync")
+                    logger.info("⚠️ Failed to get storage for config sync")
                 return False
 
             # Get config file path
@@ -90,7 +94,7 @@ class ConfigSync:
 
             if not os.path.exists(config_path):
                 if not silent:
-                    print("⚠️ Config file not found")
+                    logger.info("⚠️ Config file not found")
                 return False
 
             # Create metadata
@@ -120,21 +124,21 @@ class ConfigSync:
                         )
                 except Exception as e:
                     if not silent:
-                        print(f"⚠️ proxy config upload skipped: {e}")
+                        logger.info(f"⚠️ proxy config upload skipped: {e}")
 
                 if not silent:
                     target_name = self.storage_manager.get_storage_name(target_id)
-                    print(f"✅ Config synced to Storage ({target_name})")
+                    logger.info(f"✅ Config synced to Storage ({target_name})")
 
                 return True
             else:
                 if not silent:
-                    print("⚠️ Failed to upload config to storage provider")
+                    logger.info("⚠️ Failed to upload config to storage provider")
                 return False
 
         except Exception as e:
             if not silent:
-                print(f"⚠️ Config sync failed: {e}")
+                logger.info(f"⚠️ Config sync failed: {e}")
             return False
 
     def sync_from_storage(self, force: bool = False, interactive: bool = True) -> bool:
@@ -155,13 +159,13 @@ class ConfigSync:
         try:
             storage = self.storage_manager.get_storage(target_id)
             if not storage:
-                print("⚠️ Failed to get storage for config sync")
+                logger.info("⚠️ Failed to get storage for config sync")
                 return False
 
             # Check if config exists on remote
             remote_config_info = storage.get_file_info(self.config_backup_key)
             if not remote_config_info:
-                print("ℹ️  No config found on remote storage")
+                logger.info("ℹ️  No config found on remote storage")
                 return False
 
             from config import CONFIG_FILE
@@ -181,12 +185,12 @@ class ConfigSync:
                     remote_mtime = remote_mtime.replace(tzinfo=None)
 
                 if local_mtime > remote_mtime:
-                    print(
+                    logger.info(
                         "ℹ️  Local config is newer "
                         f"(local: {local_mtime}, Remote: {remote_mtime})"
                     )
                     if not interactive:
-                        print("   Skipping download in non-interactive mode")
+                        logger.info("   Skipping download in non-interactive mode")
                         return False
                     response = (
                         input("   Overwrite with remote version? (y/n): ")
@@ -194,7 +198,7 @@ class ConfigSync:
                         .strip()
                     )
                     if response != "y":
-                        print("   Keeping local config")
+                        logger.info("   Keeping local config")
                         return False
 
             # Backup local config before downloading
@@ -204,11 +208,11 @@ class ConfigSync:
                     f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 )
                 shutil.copy2(local_config_path, backup_path)
-                print(f"📋 Local config backed up to: {backup_path}")
+                logger.info(f"📋 Local config backed up to: {backup_path}")
 
             # Download from remote
             if storage.download_file(self.config_backup_key, local_config_path):
-                print("✅ Config downloaded from storage")
+                logger.info("✅ Config downloaded from storage")
 
                 # Reload config in memory
                 self.config_manager.config = self.config_manager._load_config()
@@ -221,16 +225,16 @@ class ConfigSync:
                         storage.download_file(
                             self.proxy_backup_key, str(PROXY_CONFIG_FILE)
                         )
-                        print("✅ Proxy config downloaded from storage")
+                        logger.info("✅ Proxy config downloaded from storage")
                 except Exception as e:
-                    print(f"ℹ️  proxy config not synced: {e}")
+                    logger.info(f"ℹ️  proxy config not synced: {e}")
                 return True
             else:
-                print("⚠️ Failed to download config from storage")
+                logger.info("⚠️ Failed to download config from storage")
                 return False
 
         except Exception as e:
-            print(f"⚠️ Config download failed: {e}")
+            logger.info(f"⚠️ Config download failed: {e}")
             return False
 
     def get_storage_config_info(self) -> Optional[Dict[str, Any]]:
@@ -262,11 +266,11 @@ class ConfigSync:
         if not self.is_enabled():
             return
 
-        print("\n🔄 Checking for config updates from storage...")
+        logger.info("\n🔄 Checking for config updates from storage...")
 
         remote_info = self.get_storage_config_info()
         if not remote_info:
-            print("ℹ️  No config found on storage")
+            logger.info("ℹ️  No config found on storage")
             return
 
         from config import CONFIG_FILE
@@ -282,11 +286,11 @@ class ConfigSync:
                 remote_mtime = remote_mtime.replace(tzinfo=None)
 
             if remote_mtime > local_mtime:
-                print("📥 Remote config is newer - downloading...")
+                logger.info("📥 Remote config is newer - downloading...")
                 self.sync_from_storage(force=True)
             else:
-                print("✅ Local config is up to date")
+                logger.info("✅ Local config is up to date")
         else:
             # No local config, download from storage
-            print("📥 Downloading config from storage...")
+            logger.info("📥 Downloading config from storage...")
             self.sync_from_storage(force=True)

@@ -1,0 +1,56 @@
+# Files excluded from the production backend image.
+# Anything matched here is not visible at COPY time, so it cannot end up
+# baked into a layer or read by a runtime exploit.
+
+# Test fixtures and seed scripts contain plaintext credentials and are not
+# needed at runtime.
+seeds/
+tests/
+test_*.py
+**/test_*.py
+*_test.py
+
+# Local virtualenvs / dev tooling.
+.conda/
+.venv/
+venv/
+env/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build / cache artefacts.
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Source-tree noise that has no business in an image.
+.git/
+.gitignore
+.github/
+.pre-commit-config.yaml
+*.md
+.editorconfig
+.DS_Store
+
+# Secrets — only the example ships, never a real .env.
+.env
+.env.*
+!.env.example
+
+# Editor / IDE.
+.vscode/
+.idea/
+
+# Coverage reports.
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Dev-only requirements (linters, formatters, type stubs).
+requirements-dev.txt

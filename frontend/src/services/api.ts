@@ -1,30 +1,26 @@
 import axios from "axios"
 import type { DatabaseResponse, StorageResponse, ScheduleResponse } from "@/types"
-import { TOKEN_KEY, AUTH_LOGOUT_EVENT } from "@/lib/constants"
+import { AUTH_LOGOUT_EVENT } from "@/lib/constants"
 
+// withCredentials: cookies (httpOnly session) are sent automatically.
+// X-Requested-With: required by the backend on state-changing requests as a
+// CSRF guard. Browsers refuse to set this header cross-origin without a
+// CORS preflight, and our backend CORS allow-list is explicit.
 const api = axios.create({
   baseURL: "/api/v1",
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
+    "X-Requested-With": "XMLHttpRequest",
   },
 })
 
-// Attach bearer token to every request
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY)
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-// On 401: remove token and dispatch a custom event so AuthProvider can react
-// without a full page reload (preserves React state/context)
+// On 401: dispatch a custom event so AuthProvider can drop user state without
+// a full page reload (preserves React context).
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem(TOKEN_KEY)
       window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT))
     }
     if (error.response?.status === 403) {
@@ -183,6 +179,11 @@ export const auditApi = {
     offset?: number
   }) => api.get("/audit-logs", { params }),
   getActions: () => api.get<string[]>("/audit-logs/actions"),
+}
+
+export const authApi = {
+  me: () => api.get("/auth/me"),
+  logout: () => api.post("/auth/logout"),
 }
 
 export default api
