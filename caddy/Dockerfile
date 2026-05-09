@@ -5,7 +5,7 @@
 # malicious tag republish or a force-pushed branch cannot slip into a
 # rebuild unchecked. Bump the version, rebuild, run the proxy integration
 # tests, then commit.
-FROM caddy:2.10-builder AS builder
+FROM caddy:2.11-builder AS builder
 
 # Force a recent Go toolchain — caddy-dns/route53 requires Go >= 1.25.
 ENV GOTOOLCHAIN=go1.25.0
@@ -17,7 +17,7 @@ RUN xcaddy build \
     --with github.com/caddy-dns/gandi@v1.1.0 \
     --with github.com/caddy-dns/duckdns@v0.5.0
 
-FROM caddy:2.10
+FROM caddy:2.11
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY entrypoint.sh /usr/local/bin/dbmgr-caddy-entrypoint.sh
