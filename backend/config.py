@@ -14,9 +14,11 @@ SENSITIVE_FIELDS = [
     "password",
     "smtp_password",
     "aws_secret_access_key",
+    "access_key",  # S3 access key id; pairs with secret_key, encrypt to match.
     "secret_key",
     "webhook_url",  # Often contains tokens
     "connection_string",
+    "uri",  # MongoDB URI may embed user:pass — bypassed `password` encryption.
     "smb_password",
     "jwt_secret",
 ]

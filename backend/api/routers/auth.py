@@ -1,8 +1,16 @@
+import asyncio
 import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime
 from typing import Deque, Dict, Optional, Tuple
+
+# Floor on the total time the /token endpoint takes to respond on a failure.
+# bcrypt + audit make valid-user / fake-user paths converge to ~50–200 ms but
+# a residual ms-level difference remained in pen-tests; padding to a fixed
+# floor erases the username-enumeration timing oracle without measurably
+# slowing the success path.
+_LOGIN_FAILURE_MIN_DURATION_S = 0.25
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -119,6 +127,7 @@ async def login_for_access_token(
 ) -> dict[str, str]:
     ip = _client_ip(request)
     username = form_data.username
+    t0 = time.monotonic()
 
     ok, reason = _rate_check(ip, username)
     if not ok:
@@ -149,6 +158,13 @@ async def login_for_access_token(
             request=request,
             details={"username": username},
         )
+        # Constant-time floor: even after burn_cycles equalises bcrypt work,
+        # DB-lookup branches and audit-write costs differ between
+        # known/unknown users by a few ms. Sleep up to the floor before
+        # responding so a remote observer cannot tell which branch ran.
+        elapsed = time.monotonic() - t0
+        if elapsed < _LOGIN_FAILURE_MIN_DURATION_S:
+            await asyncio.sleep(_LOGIN_FAILURE_MIN_DURATION_S - elapsed)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",

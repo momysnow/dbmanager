@@ -503,15 +503,10 @@ async def public_status() -> JSONResponse:
 
 @app.get("/api/health")
 async def health_check() -> Dict[str, Any]:
-    return {
-        "status": "healthy",
-        "tasks": {
-            "running": len(
-                [t for t in task_manager.tasks.values() if t["status"] == "running"]
-            ),
-            "total": len(task_manager.tasks),
-        },
-    }
+    # Anonymous endpoint — keep the body free of stack-state hints (running
+    # task counts, DB counts, etc.) that could fingerprint activity for an
+    # unauthenticated attacker. Use /livez and /readyz for richer probes.
+    return {"status": "healthy"}
 
 
 @app.get("/livez", include_in_schema=False)

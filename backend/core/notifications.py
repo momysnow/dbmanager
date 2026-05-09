@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import smtplib
+import threading
 from abc import ABC, abstractmethod
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -14,9 +15,17 @@ from typing import Any, Dict, List, Optional, cast
 from urllib.parse import urlparse
 
 import requests
+import urllib3.util.connection as _u3_conn
 
 
 logger = logging.getLogger(__name__)
+
+
+# Serialises the global urllib3 connection-creator patch used by
+# _safe_post_webhook below. Webhook sends are rare and small; serialising
+# them avoids the multi-thread race where two concurrent patches would
+# clobber each other and leave one call un-pinned.
+_DNS_PIN_LOCK = threading.Lock()
 
 
 def _is_private_or_local_ip(ip: str) -> bool:
@@ -73,6 +82,68 @@ def _assert_safe_webhook_url(url: str) -> None:
                 f"Webhook URL host {host!r} resolves to a non-public IP "
                 f"({ip}); refused for SSRF protection."
             )
+
+
+def _safe_post_webhook(
+    url: str,
+    *,
+    data: Optional[Any] = None,
+    json_body: Optional[Any] = None,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: int = 10,
+) -> "requests.Response":
+    """SSRF-safe POST to a webhook.
+
+    Validates the URL, resolves the hostname **once**, then pins urllib3 to
+    that IP for the lifetime of this call. This closes the DNS-rebinding
+    TOCTOU window between ``_assert_safe_webhook_url`` and the actual POST
+    that requests would otherwise re-resolve through ``getaddrinfo``.
+
+    Also disables redirects so a response can't trampoline us onto an
+    internal target after passing validation.
+
+    Concurrency: serialised on ``_DNS_PIN_LOCK`` because the patch target
+    (``urllib3.util.connection.create_connection``) is module-global. This
+    is fine for our usage — webhook sends are infrequent and small.
+    """
+    _assert_safe_webhook_url(url)
+
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    infos = socket.getaddrinfo(host, None)
+    if not infos:
+        raise ValueError(f"Webhook host {host!r} has no addresses")
+    pinned_ip = infos[0][4][0]
+    if _is_private_or_local_ip(pinned_ip):
+        # DNS rebinding caught between validate-time and now.
+        raise ValueError(
+            f"Webhook host {host!r} now resolves to non-public {pinned_ip}; "
+            f"refused (DNS-rebinding suspected)."
+        )
+
+    with _DNS_PIN_LOCK:
+        original_create = _u3_conn.create_connection
+
+        def _pinned_create(address, *args, **kwargs):  # type: ignore[no-untyped-def]
+            h, p = address
+            # Only redirect lookups for our target hostname; leave any other
+            # connections (proxies, etc.) on the real resolver.
+            if h == host:
+                return original_create((pinned_ip, p), *args, **kwargs)
+            return original_create(address, *args, **kwargs)
+
+        _u3_conn.create_connection = _pinned_create
+        try:
+            return requests.post(
+                url,
+                data=data,
+                json=json_body,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=False,
+            )
+        finally:
+            _u3_conn.create_connection = original_create
 
 
 class NotificationType(Enum):
@@ -248,10 +319,8 @@ class SlackNotifier(BaseNotifier):
             webhook_url = self.config.get("webhook_url")
             if not isinstance(webhook_url, str) or not webhook_url:
                 raise ValueError("Slack webhook URL not configured")
-            _assert_safe_webhook_url(webhook_url)
 
-            # Send to webhook
-            response = requests.post(
+            response = _safe_post_webhook(
                 webhook_url,
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
@@ -315,10 +384,8 @@ class TeamsNotifier(BaseNotifier):
             webhook_url = self.config.get("webhook_url")
             if not isinstance(webhook_url, str) or not webhook_url:
                 raise ValueError("Teams webhook URL not configured")
-            _assert_safe_webhook_url(webhook_url)
 
-            # Send to webhook
-            response = requests.post(
+            response = _safe_post_webhook(
                 webhook_url,
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
@@ -397,10 +464,8 @@ class DiscordNotifier(BaseNotifier):
             webhook_url = self.config.get("webhook_url")
             if not isinstance(webhook_url, str) or not webhook_url:
                 raise ValueError("Discord webhook URL not configured")
-            _assert_safe_webhook_url(webhook_url)
 
-            # Send to webhook
-            response = requests.post(
+            response = _safe_post_webhook(
                 webhook_url,
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
