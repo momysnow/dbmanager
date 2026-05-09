@@ -1,206 +1,152 @@
-# DBManager - Database Backup & Restore Tool
+# DBManager
 
-Enterprise-grade backup and restore tool for multiple database providers with S3 support, encryption, compression, scheduling, and REST API.
+Self-hosted backup, restore and query console for relational and document databases. Web UI, REST API, scheduling, encrypted offsite storage and audit logs in a single Docker Compose stack.
 
-## 🚀 Quick Start (Docker)
+![Dashboard](docs/images/dashboard.png)
+
+## Highlights
+
+- 5 supported engines: **PostgreSQL, MySQL, MariaDB, SQL Server, MongoDB**
+- Web UI for everything: connections, backups, schedules, storage, query editor, users, audit
+- REST API with OpenAPI / Swagger UI
+- Built-in **Caddy reverse proxy** with automatic HTTPS (Let's Encrypt DNS-01 / HTTP-01, manual cert, self-signed)
+- Encrypted backups (AES-256 / ChaCha20), zstandard / gzip compression, SHA-256 checksums
+- Offsite storage: AWS S3, Cloudflare R2, MinIO, SMB shares
+- Cron-based schedules, retention policies (local + S3), notifications (Email / Slack / Teams / Discord)
+- Multi-user with RBAC and full audit log of every action
+
+## Quick start
 
 ```bash
+git clone https://github.com/momysnow/dbmanager.git
+cd dbmanager
 docker compose up -d --build
-docker exec -it dbmanager bash
-python main.py interactive
+# open http://localhost  →  admin / admin (change on first login)
 ```
 
-## 📦 Supported Databases
+Zero-config defaults: admin user is created on first run, JWT secret and master encryption key are auto-generated and persisted in `~/.dbmanager/`. See [INSTALLATION.md](INSTALLATION.md) for production setups (HTTPS, env vars, IaC).
 
-- ✅ **PostgreSQL** (pg_dump/pg_restore)
-- ✅ **MySQL** (mysqldump/mysql)
-- ✅ **MariaDB** (MySQL protocol)
-- ✅ **SQL Server** (sqlcmd/bcp)
-- ✅ **MongoDB** (mongodump/mongorestore)
+## Screenshots
 
-## ✨ Features
+### Databases
+Connect Postgres, MySQL, MariaDB, SQL Server or MongoDB. Connection test, status indicator, on-demand backup, query editor.
 
-### Core
+![Databases](docs/images/databases.png)
 
-- 🔄 **Backup & Restore** - All major databases
-- ☁️ **S3 Storage** - AWS, Cloudflare R2, MinIO
-- 🗜️ **Compression** - gzip, zstandard (configurable levels)
-- 🔐 **Encryption** - AES-256 or ChaCha20
-- ✅ **Checksum** - SHA-256 verification
-- 🔁 **Config Sync** - S3-based configuration backup
+### Query editor — SQL & schema graph
+SQL Editor with results, Data Editor, and an interactive Schema Graph showing tables and foreign-key relations.
 
-### Automation
+![Query SQL Editor](docs/images/query-sql.png)
+![Schema Graph](docs/images/query-schema-graph.png)
 
-- ⏰ **Scheduling** - Cron-based automatic backups
-- 🔔 **Notifications** - Email, Slack, Teams, Discord
-- 📊 **Dashboard** - CLI statistics and health monitoring
-- 📝 **Structured Logging** - Rotating logs with JSON support
+### Backups
+Chronological list across all databases. Local + S3 / SMB locations, SHA-256 verification, one-click restore.
 
-### API
+![Backups](docs/images/backups.png)
 
-- 🌐 **REST API** - FastAPI with OpenAPI docs
-- 🎯 **Background Tasks** - Async backup/restore
-- 📡 **Service Mode** - Daemon API server
+### Schedules
+Cron-based automatic backups. Per-database, pausable, with status and next-run.
 
-### Management
+![Schedules](docs/images/schedules.png)
 
-- 📤 **Export/Import** - Configuration backup/restore
-- 💾 **Retention** - Local and S3 cleanup policies
-- 🏥 **Health Checks** - System status monitoring
+### Storage
+S3-compatible (AWS, R2, MinIO) and SMB providers. Multiple destinations per deployment.
 
-## 🏗️ Architecture
+![Storage](docs/images/storage.png)
+
+### Settings
+Proxy / TLS, compression, encryption, notifications, backup config (export/import full config as a single zip).
+
+![Settings](docs/images/settings.png)
+
+### Users & audit
+Local user store with RBAC, password reset and a full audit log of every API call.
+
+![Users](docs/images/users.png)
+![Audit Log](docs/images/audit-log.png)
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│         CLI (Interactive Menu)          │
-│  - Dashboard                            │
-│  - Manage Databases                     │
-│  - Schedules, Settings, S3              │
-└─────────────┬───────────────────────────┘
-              │
-              ↓
-┌─────────────────────────────────────────┐
-│         Core Business Logic             │
-│  - DBManager                            │
-│  - Providers (5 database types)         │
-│  - BucketManager (S3)                   │
-│  - NotificationManager                  │
-│  - Encryption, Compression, Checksums   │
-└─────────────┬───────────────────────────┘
-              │
-              ↓
-┌─────────────────────────────────────────┐
-│      REST API (FastAPI, optional)       │
-│  - Endpoints for all operations         │
-│  - Background task manager              │
-└─────────────────────────────────────────┘
+                    ┌──────────────┐
+                    │    Caddy     │  :80 / :443  (auto-HTTPS)
+                    │ reverse proxy│
+                    └──────┬───────┘
+                  /api          /
+                    │           │
+        ┌───────────▼──┐   ┌────▼────────┐
+        │   Backend    │   │  Frontend   │
+        │ FastAPI +    │   │ React 19 +  │
+        │ APScheduler  │   │ Vite + shadcn│
+        └──────┬───────┘   └─────────────┘
+               │
+   ┌───────────┼─────────────────────────┐
+   │           │                         │
+┌──▼──┐  ┌─────▼─────┐  ┌──────────┐  ┌──▼────────┐
+│ DBs │  │ S3 / SMB  │  │ Cron     │  │ Audit /   │
+│ pg  │  │ storage   │  │ engine   │  │ Users DB  │
+│ my  │  │ providers │  │          │  │ (sqlite)  │
+│ mssql│ └───────────┘  └──────────┘  └───────────┘
+│ mongo│
+└─────┘
 ```
 
-## 📖 Documentation
+## Tech stack
 
-- [Installation Guide](INSTALLATION.md) - Docker & local setup
-- [API Documentation](http://localhost:8000/docs) - Swagger UI (when API running)
+- **Backend** — Python 3.10+, FastAPI, Uvicorn, APScheduler, SQLAlchemy + Alembic, boto3, pysmb, cryptography, zstandard
+- **Frontend** — React 19, TypeScript, Vite, Tailwind CSS, shadcn/ui, React Flow (schema graph), Recharts
+- **Infra** — Docker Compose, Caddy 2 (reverse proxy + ACME)
+- **DB clients shipped in image** — PostgreSQL 18, MySQL/MariaDB, mssql-tools18, MongoDB Database Tools
 
-## 🛠️ Tech Stack
+## REST API
 
-- **Python 3.10+**
-- **CLI**: Typer, InquirerPy, Rich
-- **API**: FastAPI, Uvicorn
-- **Database Drivers**: psycopg2, pymysql, pymssql
-- **Cloud**: boto3 (S3)
-- **Compression**: zstandard
-- **Encryption**: cryptography
-
-## ✅ Code Quality
-
-Install dev tools:
+OpenAPI docs are served at `http://<host>/docs` once the stack is up.
 
 ```bash
-pip install -r requirements-dev.txt
+# Login
+curl -X POST http://localhost/api/v1/auth/token \
+  -d 'username=admin&password=admin'
+
+# Trigger a backup
+curl -X POST http://localhost/api/v1/databases/1/backup \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-Run checks:
+## Configuration
+
+All settings are editable from the **Settings** page in the UI and persisted in `~/.dbmanager/config.json`. Same values can be pinned via environment variables — useful for IaC / immutable deployments. See `.env.example`.
+
+| Variable                   | Description                            | Default     |
+| -------------------------- | -------------------------------------- | ----------- |
+| `DBMANAGER_CREATE_ADMIN`   | Create admin user on first run         | `true`      |
+| `DBMANAGER_ADMIN_USER`     | Initial admin username                 | `admin`     |
+| `DBMANAGER_ADMIN_PASSWORD` | Initial admin password                 | `admin`     |
+| `DBMANAGER_JWT_SECRET`     | JWT secret for API tokens              | (generated) |
+| `DBMANAGER_MASTER_KEY`     | Master key for config encryption       | (generated) |
+| `DBMANAGER_PROXY_MODE`     | `http` / `https-letsencrypt` / `manual`| (UI)        |
+| `DBMANAGER_PROXY_DOMAIN`   | Public domain for the reverse proxy    | (UI)        |
+| `ALLOWED_ORIGINS`          | CORS origins (comma-separated)         | localhost   |
+
+## Development
 
 ```bash
-black .
-flake8 .
-mypy .
+# Backend
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt
+uvicorn api_server:app --reload
+
+# Frontend
+cd frontend
+npm install
+npm run dev
 ```
 
-Docstring warnings (non-blocking, Google style):
+Code quality (Black, Flake8, Mypy, ESLint) and pre-commit hooks are configured. Run `pre-commit run --all-files` before pushing.
 
-```bash
-flake8 --select D --exit-zero
-```
+## License
 
-Pre-commit:
+Apache License 2.0 — see [LICENSE](LICENSE).
 
-```bash
-pre-commit run --all-files
-```
+## Contributing
 
-### Tools Explained
-
-- **Black**: The uncompromising Python code formatter. It enforces a consistent clicking style.
-- **Flake8**: A wrapper around `PyFlakes`, `pycodestyle`, and `Ned Batchelder's McCabe script`. It checks for style guide enforcement (PEP8) and programming errors.
-- **Mypy**: A static type checker for Python. It acts as a linter that checks for type errors using Python 3 type hints.
-
-## 🐳 Docker
-
-All database tools pre-installed:
-
-- PostgreSQL 18 client
-- MySQL/MariaDB client
-- SQL Server tools (mssql-tools18)
-- MongoDB Database Tools
-
-### Environment variables
-
-You can configure the API auth and encryption via environment variables (recommended for Docker).
-
-| Variable                 | Description                               | Default     |
-| ------------------------ | ----------------------------------------- | ----------- |
-| DBMANAGER_CREATE_ADMIN   | Create admin user on first run            | true        |
-| DBMANAGER_ADMIN_USER     | Initial admin username                    | admin       |
-| DBMANAGER_ADMIN_PASSWORD | Initial admin password                    | admin       |
-| DBMANAGER_JWT_SECRET     | JWT secret for API tokens                 | (generated) |
-| DBMANAGER_MASTER_KEY     | Master key for config encryption (Fernet) | (generated) |
-
-Copy .env.example and edit values:
-
-```bash
-cp .env.example .env
-```
-
-## 📝 Configuration
-
-Config stored in: `~/.dbmanager/config.json`
-
-```json
-{
-  "databases": [...],
-  "s3_buckets": [...],
-  "schedules": [...],
-  "global_settings": {
-    "compression": {...},
-    "encryption": {...}
-  },
-  "notifications": {...}
-}
-```
-
-## 🎯 Usage Examples
-
-### CLI
-
-```bash
-# Interactive menu
-python main.py interactive
-
-# Start API server
-python main.py start-api
-
-# Check API status
-python main.py status-api
-```
-
-### API
-
-```bash
-# Start API
-docker compose up -d
-
-# Access Swagger docs
-open http://localhost:8000/docs
-
-# Backup via API
-curl -X POST http://localhost:8000/api/v1/backups/1
-```
-
-## 📄 License
-
-[Your License]
-
-## 🤝 Contributing
-
-[Contributing guidelines]
+Issues and PRs welcome. Please open an issue first for non-trivial changes so we can discuss scope.
