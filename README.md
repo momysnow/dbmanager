@@ -67,28 +67,32 @@ Local user store with RBAC, password reset and a full audit log of every API cal
 
 ## Architecture
 
-```
-                    ┌──────────────┐
-                    │    Caddy     │  :80 / :443  (auto-HTTPS)
-                    │ reverse proxy│
-                    └──────┬───────┘
-                  /api          /
-                    │           │
-        ┌───────────▼──┐   ┌────▼────────┐
-        │   Backend    │   │  Frontend   │
-        │ FastAPI +    │   │ React 19 +  │
-        │ APScheduler  │   │ Vite + shadcn│
-        └──────┬───────┘   └─────────────┘
-               │
-   ┌───────────┼─────────────────────────┐
-   │           │                         │
-┌──▼──┐  ┌─────▼─────┐  ┌──────────┐  ┌──▼────────┐
-│ DBs │  │ S3 / SMB  │  │ Cron     │  │ Audit /   │
-│ pg  │  │ storage   │  │ engine   │  │ Users DB  │
-│ my  │  │ providers │  │          │  │ (sqlite)  │
-│ mssql│ └───────────┘  └──────────┘  └───────────┘
-│ mongo│
-└─────┘
+```mermaid
+flowchart TB
+    user(["Browser / API client"])
+
+    subgraph edge["Edge"]
+        caddy["Caddy<br/>reverse proxy<br/>:80 / :443 · auto-HTTPS"]
+    end
+
+    subgraph app["Application"]
+        frontend["Frontend<br/>React 19 · Vite · shadcn/ui"]
+        backend["Backend<br/>FastAPI · APScheduler"]
+    end
+
+    subgraph data["Data plane"]
+        dbs[("Managed DBs<br/>Postgres · MySQL · MariaDB<br/>SQL Server · MongoDB")]
+        storage[("Offsite storage<br/>S3 · R2 · MinIO · SMB")]
+        sqlite[("Local SQLite<br/>users · audit · config")]
+    end
+
+    user -->|HTTPS| caddy
+    caddy -->|/| frontend
+    caddy -->|/api| backend
+    frontend -->|REST| backend
+    backend -->|dump / restore / query| dbs
+    backend -->|encrypted backups| storage
+    backend --- sqlite
 ```
 
 ## Tech stack
