@@ -5,7 +5,7 @@
 # Regenerate the lock after editing this file (see header of requirements.lock).
 
 # Database (async SQLAlchemy + Alembic)
-sqlalchemy[asyncio]>=2.0
+sqlalchemy[asyncio]>=2.0.49
 aiosqlite
 alembic
 sqlparse>=0.4
