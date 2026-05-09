@@ -15,7 +15,7 @@ COPY . .
 RUN npm run build
 
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.29-alpine AS runtime
 
 # nginx:alpine ships an `nginx` user (uid 101). We keep nginx as PID 1 (it
 # drops to that user for workers itself) but make all served files owned by
