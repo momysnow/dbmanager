@@ -11,7 +11,9 @@ from db.repositories.users_repo import count_users, create_user
 
 logger = logging.getLogger(__name__)
 
-CONFIG_DIR = Path(__import__("os").getenv("DBMANAGER_DATA_DIR", str(Path.home() / ".dbmanager")))
+CONFIG_DIR = Path(
+    __import__("os").getenv("DBMANAGER_DATA_DIR", str(Path.home() / ".dbmanager"))
+)
 CONFIG_FILE = CONFIG_DIR / "config.json"
 CONFIG_BACKUP = CONFIG_DIR / "config.json.pre-rbac.bak"
 
@@ -42,11 +44,15 @@ async def migrate_users_from_config(session: AsyncSession) -> int:
         password_hash = u.get("password_hash")
         role = u.get("role", "admin")
         if role not in ("admin", "operator", "viewer"):
-            logger.warning("Unknown role %r for user %r — defaulting to viewer", role, username)
+            logger.warning(
+                "Unknown role %r for user %r — defaulting to viewer", role, username
+            )
             role = "viewer"
         if username and password_hash:
             try:
-                await create_user(session, username=username, password_hash=password_hash, role=role)
+                await create_user(
+                    session, username=username, password_hash=password_hash, role=role
+                )
                 imported += 1
             except Exception:
                 logger.warning("Failed to import user %s", username)

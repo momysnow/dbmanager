@@ -20,7 +20,9 @@ class AuditLog(Base):
     )
     username_snapshot: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     action: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    resource_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    resource_type: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
     resource_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(
         Enum("success", "failure", "denied", name="audit_status"),
@@ -31,6 +33,4 @@ class AuditLog(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     details: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
 
-    __table_args__ = (
-        Index("ix_audit_logs_timestamp_desc", "timestamp"),
-    )
+    __table_args__ = (Index("ix_audit_logs_timestamp_desc", "timestamp"),)

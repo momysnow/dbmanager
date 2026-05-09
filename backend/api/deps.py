@@ -66,6 +66,7 @@ async def get_current_user(
 
 def require_role(*roles: str) -> Callable:
     """Dependency factory. Raises 403 if current user's role not in allowed roles."""
+
     async def _check(
         request: Request,
         current_user: User = Depends(get_current_user),
@@ -74,6 +75,7 @@ def require_role(*roles: str) -> Callable:
         if current_user.role not in roles:
             # Critical audit: write synchronously before raising so it can't be lost.
             from core.audit import record_audit
+
             await record_audit(
                 action="access.denied",
                 resource_type=request.url.path,

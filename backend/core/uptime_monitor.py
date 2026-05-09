@@ -23,7 +23,9 @@ class UptimeMonitor:
 
     def start(self) -> None:
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True, name="uptime-monitor")
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="uptime-monitor"
+        )
         self._thread.start()
 
     def stop(self) -> None:

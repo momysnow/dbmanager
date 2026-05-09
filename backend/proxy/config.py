@@ -23,10 +23,10 @@ class ProxyMode(str, Enum):
 
 
 class AcmeMethod(str, Enum):
-    NONE = "none"            # used with mode=http
-    DNS = "dns"              # DNS-01 via plugin
-    HTTP01 = "http-01"       # HTTP-01 challenge
-    MANUAL = "manual"        # user-provided cert/key
+    NONE = "none"  # used with mode=http
+    DNS = "dns"  # DNS-01 via plugin
+    HTTP01 = "http-01"  # HTTP-01 challenge
+    MANUAL = "manual"  # user-provided cert/key
     SELFSIGNED = "selfsigned"  # caddy `tls internal`
 
 

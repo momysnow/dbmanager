@@ -69,7 +69,9 @@ async def _count_active_admins(db: AsyncSession) -> int:
 
 def _check_password_strength(username: str, password: str) -> None:
     if username and username.lower() in password.lower():
-        raise HTTPException(status_code=400, detail="Password must not contain username")
+        raise HTTPException(
+            status_code=400, detail="Password must not contain username"
+        )
 
 
 @router.get("/users", response_model=UserListResponse, dependencies=_admin_only)
@@ -80,10 +82,14 @@ async def list_all_users(
 ) -> UserListResponse:
     users = await list_users(db, skip=skip, limit=limit)
     total = await count_users(db)
-    return UserListResponse(total=total, users=[UserResponse.model_validate(u) for u in users])
+    return UserListResponse(
+        total=total, users=[UserResponse.model_validate(u) for u in users]
+    )
 
 
-@router.post("/users", response_model=UserResponse, status_code=201, dependencies=_admin_only)
+@router.post(
+    "/users", response_model=UserResponse, status_code=201, dependencies=_admin_only
+)
 async def create_new_user(
     body: UserCreate,
     request: Request,
@@ -97,7 +103,9 @@ async def create_new_user(
     if existing:
         raise HTTPException(status_code=409, detail="Username already exists")
     hashed = auth_manager.get_password_hash(body.password)
-    user = await create_user(db, username=body.username, password_hash=hashed, role=body.role)
+    user = await create_user(
+        db, username=body.username, password_hash=hashed, role=body.role
+    )
     await db.commit()
     await record_audit(
         action="user.created",
@@ -128,15 +136,23 @@ async def update_user(
         if body.role is not None and body.role != user.role:
             raise HTTPException(status_code=400, detail="Cannot change your own role")
         if body.is_active is False:
-            raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+            raise HTTPException(
+                status_code=400, detail="Cannot deactivate your own account"
+            )
 
     # Last-admin invariant: demoting or deactivating an admin requires another admin to exist.
-    would_demote = user.role == "admin" and body.role is not None and body.role != "admin"
-    would_deactivate = user.role == "admin" and user.is_active and body.is_active is False
+    would_demote = (
+        user.role == "admin" and body.role is not None and body.role != "admin"
+    )
+    would_deactivate = (
+        user.role == "admin" and user.is_active and body.is_active is False
+    )
     if would_demote or would_deactivate:
         remaining = await _count_active_admins(db)
         if remaining <= 1:
-            raise HTTPException(status_code=400, detail="At least one active admin must remain")
+            raise HTTPException(
+                status_code=400, detail="At least one active admin must remain"
+            )
 
     if body.role is not None:
         if body.role not in _VALID_ROLES:
@@ -207,7 +223,9 @@ async def delete_user(
     if user.role == "admin" and user.is_active:
         remaining = await _count_active_admins(db)
         if remaining <= 1:
-            raise HTTPException(status_code=400, detail="At least one active admin must remain")
+            raise HTTPException(
+                status_code=400, detail="At least one active admin must remain"
+            )
     username = user.username
     await db.delete(user)
     await db.commit()

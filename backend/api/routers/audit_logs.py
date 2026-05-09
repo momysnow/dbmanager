@@ -41,7 +41,9 @@ class AuditLogListResponse(BaseModel):
     logs: List[AuditLogResponse]
 
 
-@router.get("/audit-logs", response_model=AuditLogListResponse, dependencies=_admin_only)
+@router.get(
+    "/audit-logs", response_model=AuditLogListResponse, dependencies=_admin_only
+)
 async def list_audit_log_entries(
     user_id: Optional[int] = Query(None),
     action: Optional[str] = Query(None),

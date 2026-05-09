@@ -1,4 +1,5 @@
 from core.manager import DBManager
+
 db_m = DBManager()
 
 for db_id in [2, 3, 4]:

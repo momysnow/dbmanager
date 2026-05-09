@@ -18,7 +18,11 @@ _MASKED = "***MASKED***"
 def _mask_sensitive(data: Any) -> Any:
     if isinstance(data, dict):
         return {
-            k: _MASKED if k in SENSITIVE_FIELDS and isinstance(v, str) and v else _mask_sensitive(v)
+            k: (
+                _MASKED
+                if k in SENSITIVE_FIELDS and isinstance(v, str) and v
+                else _mask_sensitive(v)
+            )
             for k, v in data.items()
         }
     if isinstance(data, list):
@@ -32,7 +36,10 @@ async def export_config(
 ) -> JSONResponse:
     """Export full config with sensitive fields masked."""
     safe = _mask_sensitive(copy.deepcopy(config_manager.config))
-    return JSONResponse(content=safe, headers={"Content-Disposition": "attachment; filename=dbmanager-config.json"})
+    return JSONResponse(
+        content=safe,
+        headers={"Content-Disposition": "attachment; filename=dbmanager-config.json"},
+    )
 
 
 _PROVIDER_DOCKER: Dict[str, str] = {

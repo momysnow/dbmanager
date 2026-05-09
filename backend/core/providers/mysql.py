@@ -76,8 +76,14 @@ class MySQLProvider(BaseProvider):
 
             # mysqldump may return exit code 0 even on auth/connection errors
             # Check stderr for errors AND file size
-            if result.returncode != 0 or (result.stderr and "error" in result.stderr.lower()):
-                error_msg = result.stderr.strip() if result.stderr else f"mysqldump exited with code {result.returncode}"
+            if result.returncode != 0 or (
+                result.stderr and "error" in result.stderr.lower()
+            ):
+                error_msg = (
+                    result.stderr.strip()
+                    if result.stderr
+                    else f"mysqldump exited with code {result.returncode}"
+                )
                 if progress:
                     progress.fail(f"mysqldump failed: {error_msg}")
                 raise RuntimeError(f"Backup failed: {error_msg}")
@@ -87,7 +93,9 @@ class MySQLProvider(BaseProvider):
 
             # Verify the backup file was created and has content
             if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
-                error_detail = result.stderr.strip() if result.stderr else "unknown error"
+                error_detail = (
+                    result.stderr.strip() if result.stderr else "unknown error"
+                )
                 # Clean up empty file
                 try:
                     os.remove(filepath)

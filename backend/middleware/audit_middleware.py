@@ -55,7 +55,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 status=status_str,
                 user=user,
                 request=request,
-                details={"status_code": response.status_code, "duration_ms": duration_ms},
+                details={
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                },
             )
         )
 
@@ -73,6 +76,7 @@ async def _write_audit(
 ) -> None:
     try:
         from core.audit import record_audit
+
         await record_audit(
             action=action,
             status=status,

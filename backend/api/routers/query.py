@@ -21,12 +21,42 @@ _all_roles = [Depends(require_role("admin", "operator", "viewer"))]
 
 # Tokens that represent writes / DDL / side-effect-producing ops.
 _WRITE_KEYWORDS = {
-    "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE",
-    "REPLACE", "MERGE", "CALL", "EXEC", "EXECUTE", "GRANT", "REVOKE",
-    "COPY", "DO", "LOAD", "VACUUM", "ANALYZE", "REINDEX", "CLUSTER",
-    "LOCK", "RENAME", "COMMENT", "SET", "RESET", "BEGIN", "COMMIT",
-    "ROLLBACK", "SAVEPOINT", "ATTACH", "DETACH", "PRAGMA", "HANDLER",
-    "INSTALL", "UNINSTALL",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "CREATE",
+    "ALTER",
+    "TRUNCATE",
+    "REPLACE",
+    "MERGE",
+    "CALL",
+    "EXEC",
+    "EXECUTE",
+    "GRANT",
+    "REVOKE",
+    "COPY",
+    "DO",
+    "LOAD",
+    "VACUUM",
+    "ANALYZE",
+    "REINDEX",
+    "CLUSTER",
+    "LOCK",
+    "RENAME",
+    "COMMENT",
+    "SET",
+    "RESET",
+    "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "ATTACH",
+    "DETACH",
+    "PRAGMA",
+    "HANDLER",
+    "INSTALL",
+    "UNINSTALL",
 }
 
 # Explain variants that can still execute the underlying plan.
@@ -50,19 +80,32 @@ def _classify(sql: str) -> Tuple[bool, int]:
     stmts = [s for s in parsed if s.tokens and str(s).strip()]
     count = len(stmts)
     for stmt in stmts:
-        tokens = [t for t in stmt.flatten() if not t.is_whitespace and t.ttype not in (
-            sqlparse.tokens.Comment,
-            sqlparse.tokens.Comment.Single,
-            sqlparse.tokens.Comment.Multiline,
-        )]
+        tokens = [
+            t
+            for t in stmt.flatten()
+            if not t.is_whitespace
+            and t.ttype
+            not in (
+                sqlparse.tokens.Comment,
+                sqlparse.tokens.Comment.Single,
+                sqlparse.tokens.Comment.Multiline,
+            )
+        ]
         if not tokens:
             continue
-        upper_words = [t.value.upper() for t in tokens if t.ttype in (
-            sqlparse.tokens.Keyword,
-            sqlparse.tokens.Keyword.DDL,
-            sqlparse.tokens.Keyword.DML,
-            sqlparse.tokens.Keyword.CTE,
-        ) or t.ttype is None and t.value.upper() in _WRITE_KEYWORDS]
+        upper_words = [
+            t.value.upper()
+            for t in tokens
+            if t.ttype
+            in (
+                sqlparse.tokens.Keyword,
+                sqlparse.tokens.Keyword.DDL,
+                sqlparse.tokens.Keyword.DML,
+                sqlparse.tokens.Keyword.CTE,
+            )
+            or t.ttype is None
+            and t.value.upper() in _WRITE_KEYWORDS
+        ]
 
         first = upper_words[0] if upper_words else ""
 
@@ -72,8 +115,17 @@ def _classify(sql: str) -> Tuple[bool, int]:
         # EXPLAIN ANALYZE <write> actually executes the plan.
         # Strip EXPLAIN-only modifiers before checking for writes.
         if first in _UNSAFE_EXPLAIN:
-            _EXPLAIN_MODS = {"ANALYZE", "VERBOSE", "COSTS", "SETTINGS", "BUFFERS",
-                             "WAL", "TIMING", "SUMMARY", "FORMAT"}
+            _EXPLAIN_MODS = {
+                "ANALYZE",
+                "VERBOSE",
+                "COSTS",
+                "SETTINGS",
+                "BUFFERS",
+                "WAL",
+                "TIMING",
+                "SUMMARY",
+                "FORMAT",
+            }
             rest = set(upper_words[1:]) - _EXPLAIN_MODS
             if rest & _WRITE_KEYWORDS:
                 return True, count
@@ -126,7 +178,9 @@ async def execute_query(
 
     query = query_request.get("query", "").strip()
     if not query:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Query is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Query is required"
+        )
 
     if current_user.role == "viewer":
         _assert_read_only(query)
@@ -139,16 +193,28 @@ async def execute_query(
         )
         return result
     except Exception as e:
-        logger.exception("Query execution failed for db=%s user=%s", database_id, current_user.username)
+        logger.exception(
+            "Query execution failed for db=%s user=%s",
+            database_id,
+            current_user.username,
+        )
         # Admins get the raw error to debug; others get a generic message.
-        detail = f"Query execution failed: {str(e)}" if current_user.role == "admin" else "Query execution failed"
+        detail = (
+            f"Query execution failed: {str(e)}"
+            if current_user.role == "admin"
+            else "Query execution failed"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=detail,
         )
 
 
-@router.get("/databases/{database_id}/tables", response_model=List[Dict[str, Any]], dependencies=_all_roles)
+@router.get(
+    "/databases/{database_id}/tables",
+    response_model=List[Dict[str, Any]],
+    dependencies=_all_roles,
+)
 async def list_tables(
     database_id: int,
     db_manager: DBManager = Depends(get_db_manager),
@@ -169,7 +235,11 @@ async def list_tables(
         )
 
 
-@router.get("/databases/{database_id}/schema", response_model=Dict[str, Any], dependencies=_all_roles)
+@router.get(
+    "/databases/{database_id}/schema",
+    response_model=Dict[str, Any],
+    dependencies=_all_roles,
+)
 async def get_database_schema(
     database_id: int,
     db_manager: DBManager = Depends(get_db_manager),
@@ -208,9 +278,7 @@ async def get_table_schema(
             detail=f"Database with ID {database_id} not found",
         )
     try:
-        return await _run_blocking(
-            db_manager.get_table_schema, database_id, table_name
-        )
+        return await _run_blocking(db_manager.get_table_schema, database_id, table_name)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

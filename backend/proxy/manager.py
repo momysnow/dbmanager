@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Bind-mounted from host (see docker-compose.yml). Inside the backend container
 # this path points at the same file caddy reads at /etc/caddy/Caddyfile.
-CADDYFILE_PATH = Path(os.getenv("DBMANAGER_CADDYFILE", "/etc/dbmanager/caddy/Caddyfile"))
+CADDYFILE_PATH = Path(
+    os.getenv("DBMANAGER_CADDYFILE", "/etc/dbmanager/caddy/Caddyfile")
+)
 
 
 class ProxyManager:
@@ -78,7 +80,9 @@ class ProxyManager:
 
     # ── Apply: persist + write file + reload (or restart on failure) ─────────
 
-    def apply(self, cfg: ProxyConfig, allow_restart_fallback: bool = True) -> Dict[str, Any]:
+    def apply(
+        self, cfg: ProxyConfig, allow_restart_fallback: bool = True
+    ) -> Dict[str, Any]:
         self.cfg_manager.save(cfg)
         path = self.write_caddyfile(cfg)
         reloaded = self.hot_reload(cfg)

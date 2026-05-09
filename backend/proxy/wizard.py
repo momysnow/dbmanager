@@ -65,10 +65,15 @@ def _prompt_interactive() -> ProxyConfig:
     ).execute()
     mode = ProxyMode(mode_choice)
 
-    domain = inquirer.text(
-        message="Domain (e.g. db.example.com or localhost):",
-        validate=lambda v: bool(v.strip()),
-    ).execute().strip().lower()
+    domain = (
+        inquirer.text(
+            message="Domain (e.g. db.example.com or localhost):",
+            validate=lambda v: bool(v.strip()),
+        )
+        .execute()
+        .strip()
+        .lower()
+    )
 
     acme = AcmeConfig()
     manual = ManualCertConfig()
@@ -77,20 +82,33 @@ def _prompt_interactive() -> ProxyConfig:
         method_choice = inquirer.select(
             message="Certificate method:",
             choices=[
-                {"name": "DNS-01 (Let's Encrypt via DNS provider API)", "value": AcmeMethod.DNS.value},
-                {"name": "HTTP-01 (Let's Encrypt, requires public port 80)", "value": AcmeMethod.HTTP01.value},
+                {
+                    "name": "DNS-01 (Let's Encrypt via DNS provider API)",
+                    "value": AcmeMethod.DNS.value,
+                },
+                {
+                    "name": "HTTP-01 (Let's Encrypt, requires public port 80)",
+                    "value": AcmeMethod.HTTP01.value,
+                },
                 {"name": "Manual cert / key files", "value": AcmeMethod.MANUAL.value},
-                {"name": "Self-signed (Caddy internal — dev only)", "value": AcmeMethod.SELFSIGNED.value},
+                {
+                    "name": "Self-signed (Caddy internal — dev only)",
+                    "value": AcmeMethod.SELFSIGNED.value,
+                },
             ],
             default=AcmeMethod.DNS.value,
         ).execute()
         acme.method = AcmeMethod(method_choice)
 
         if acme.method in (AcmeMethod.DNS, AcmeMethod.HTTP01):
-            acme.email = inquirer.text(
-                message="ACME contact email:",
-                validate=lambda v: "@" in v,
-            ).execute().strip()
+            acme.email = (
+                inquirer.text(
+                    message="ACME contact email:",
+                    validate=lambda v: "@" in v,
+                )
+                .execute()
+                .strip()
+            )
 
         if acme.method == AcmeMethod.DNS:
             prov_choice = inquirer.select(
@@ -107,14 +125,22 @@ def _prompt_interactive() -> ProxyConfig:
                 )
 
         if acme.method == AcmeMethod.MANUAL:
-            manual.cert_path = inquirer.text(
-                message="Path to certificate file (PEM):",
-                validate=lambda v: bool(v.strip()),
-            ).execute().strip()
-            manual.key_path = inquirer.text(
-                message="Path to private key file (PEM):",
-                validate=lambda v: bool(v.strip()),
-            ).execute().strip()
+            manual.cert_path = (
+                inquirer.text(
+                    message="Path to certificate file (PEM):",
+                    validate=lambda v: bool(v.strip()),
+                )
+                .execute()
+                .strip()
+            )
+            manual.key_path = (
+                inquirer.text(
+                    message="Path to private key file (PEM):",
+                    validate=lambda v: bool(v.strip()),
+                )
+                .execute()
+                .strip()
+            )
 
     return ProxyConfig(
         enabled=True,
@@ -141,7 +167,9 @@ def bootstrap(force: bool = False) -> Optional[ProxyConfig]:
     env_cfg = proxy_config_from_env()
     if env_cfg is not None:
         mgr.save(env_cfg)
-        console.print("[green]✓ proxy config written from environment variables[/green]")
+        console.print(
+            "[green]✓ proxy config written from environment variables[/green]"
+        )
         return env_cfg
 
     # No env → either non-interactive (disable) or interactive prompts.

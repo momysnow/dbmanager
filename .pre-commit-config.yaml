@@ -1,0 +1,22 @@
+# Pre-commit configuration for the repo root.
+# Black is enforced as a blocking check on backend Python sources.
+# flake8 runs as a non-blocking style report (--exit-zero) so the
+# pipeline highlights regressions without gating commits on legacy
+# style violations. Re-tighten this once the backend is fully clean.
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        types: [python]
+        files: ^backend/
+        args: ["--config", "backend/pyproject.toml"]
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        name: flake8 (warn)
+        types: [python]
+        files: ^backend/
+        args: ["--config", "backend/setup.cfg", "--exit-zero"]

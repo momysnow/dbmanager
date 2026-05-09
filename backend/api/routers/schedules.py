@@ -22,7 +22,9 @@ _all_roles = [Depends(require_role("admin", "operator", "viewer"))]
 _admin_op = [Depends(require_role("admin", "operator"))]
 
 
-@router.get("/schedules", response_model=List[ScheduleResponse], dependencies=_all_roles)
+@router.get(
+    "/schedules", response_model=List[ScheduleResponse], dependencies=_all_roles
+)
 async def list_schedules(
     config_manager: ConfigManager = Depends(get_config_manager),
 ) -> List[ScheduleResponse]:
@@ -32,7 +34,9 @@ async def list_schedules(
     return [ScheduleResponse(**s) for s in schedules]
 
 
-@router.get("/schedules/{schedule_id}", response_model=ScheduleResponse, dependencies=_all_roles)
+@router.get(
+    "/schedules/{schedule_id}", response_model=ScheduleResponse, dependencies=_all_roles
+)
 async def get_schedule(
     schedule_id: int, config_manager: ConfigManager = Depends(get_config_manager)
 ) -> ScheduleResponse:
@@ -51,7 +55,9 @@ async def get_schedule(
 
 
 @router.post(
-    "/schedules", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED,
+    "/schedules",
+    response_model=ScheduleResponse,
+    status_code=status.HTTP_201_CREATED,
     dependencies=_admin_op,
 )
 async def create_schedule(
@@ -102,7 +108,9 @@ async def create_schedule(
     return ScheduleResponse(**schedule_dict)
 
 
-@router.put("/schedules/{schedule_id}", response_model=ScheduleResponse, dependencies=_admin_op)
+@router.put(
+    "/schedules/{schedule_id}", response_model=ScheduleResponse, dependencies=_admin_op
+)
 async def update_schedule(
     schedule_id: int,
     schedule: ScheduleUpdate,
@@ -145,7 +153,11 @@ async def update_schedule(
     return ScheduleResponse(**updated_schedule)
 
 
-@router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_op)
+@router.delete(
+    "/schedules/{schedule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_admin_op,
+)
 async def delete_schedule(
     schedule_id: int, config_manager: ConfigManager = Depends(get_config_manager)
 ) -> None:
@@ -169,7 +181,11 @@ async def delete_schedule(
     return None
 
 
-@router.post("/schedules/{schedule_id}/toggle", response_model=ScheduleResponse, dependencies=_admin_op)
+@router.post(
+    "/schedules/{schedule_id}/toggle",
+    response_model=ScheduleResponse,
+    dependencies=_admin_op,
+)
 async def toggle_schedule(
     schedule_id: int, config_manager: ConfigManager = Depends(get_config_manager)
 ) -> ScheduleResponse:
@@ -196,7 +212,9 @@ async def toggle_schedule(
     return ScheduleResponse(**schedule)
 
 
-@router.get("/schedules/cron", response_model=List[CronJobResponse], dependencies=_all_roles)
+@router.get(
+    "/schedules/cron", response_model=List[CronJobResponse], dependencies=_all_roles
+)
 async def list_cron_jobs() -> List[CronJobResponse]:
     """List cron-based backup jobs"""
     jobs = cron_manager.list_jobs()
@@ -238,7 +256,11 @@ async def add_cron_job(
     return CronJobResponse(**created)
 
 
-@router.delete("/schedules/cron/{database_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_op)
+@router.delete(
+    "/schedules/cron/{database_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_admin_op,
+)
 async def delete_cron_job(database_id: int) -> None:
     """Delete a cron-based backup job"""
     cron_manager.remove_job(database_id)

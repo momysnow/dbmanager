@@ -91,6 +91,7 @@ async def _init_db() -> None:
     # Run migrations synchronously in a thread to avoid event-loop issues
     def _run_migrations() -> None:
         import sys
+
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cfg = Config(os.path.join(backend_dir, "alembic.ini"))
         cfg.set_main_option("script_location", os.path.join(backend_dir, "alembic"))
@@ -110,6 +111,7 @@ async def _init_db() -> None:
         total = await count_users(session)
         if total == 0:
             import secrets as _secrets
+
             admin_user = os.getenv("DBMANAGER_ADMIN_USER", "admin")
             env_pw = os.getenv("DBMANAGER_ADMIN_PASSWORD", "")
             if env_pw:
@@ -119,11 +121,14 @@ async def _init_db() -> None:
                 admin_password = _secrets.token_urlsafe(24)
                 must_change = True
             hashed = auth_manager.get_password_hash(admin_password)
-            user_obj = await create_user(session, username=admin_user, password_hash=hashed, role="admin")
+            user_obj = await create_user(
+                session, username=admin_user, password_hash=hashed, role="admin"
+            )
             user_obj.must_change_password = must_change
             await session.commit()
             if must_change:
                 import sys
+
                 print(
                     f"\n*** DBMANAGER: generated admin password (change immediately) ***\n"
                     f"    username: {admin_user}\n"
@@ -140,6 +145,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _init_db()
 
     from core.uptime_monitor import UptimeMonitor
+
     monitor = UptimeMonitor(
         config_manager,
         db_manager.notification_manager,
@@ -188,6 +194,7 @@ _allowed_origins: list[str] = (
 # we still refuse startup to avoid accidental misconfiguration.
 if "*" in _allowed_origins:
     import sys
+
     print(
         "FATAL: ALLOWED_ORIGINS='*' is incompatible with allow_credentials=True. "
         "Set a specific origin list.",
@@ -205,6 +212,7 @@ app.add_middleware(
 
 # Audit middleware (after CORS so CORS headers are set first)
 from middleware.audit_middleware import AuditMiddleware  # noqa: E402
+
 app.add_middleware(AuditMiddleware)
 
 # Public routes
@@ -219,10 +227,21 @@ app.include_router(schedules.router, prefix="/api/v1", tags=["Schedules"])
 app.include_router(query.router, prefix="/api/v1", tags=["Query"])
 
 # Uniform-role routers
-app.include_router(settings.router, prefix="/api/v1", tags=["Settings"], dependencies=_admin_only)
-app.include_router(notifications.router, prefix="/api/v1", tags=["Notifications"], dependencies=_admin_only)
-app.include_router(dashboard.router, prefix="/api/v1", tags=["Dashboard"], dependencies=_all_roles)
-app.include_router(export.router, prefix="/api/v1", tags=["Export"], dependencies=_admin_op)
+app.include_router(
+    settings.router, prefix="/api/v1", tags=["Settings"], dependencies=_admin_only
+)
+app.include_router(
+    notifications.router,
+    prefix="/api/v1",
+    tags=["Notifications"],
+    dependencies=_admin_only,
+)
+app.include_router(
+    dashboard.router, prefix="/api/v1", tags=["Dashboard"], dependencies=_all_roles
+)
+app.include_router(
+    export.router, prefix="/api/v1", tags=["Export"], dependencies=_admin_op
+)
 app.include_router(users_router.router, prefix="/api/v1", tags=["Users"])
 app.include_router(audit_logs_router.router, prefix="/api/v1", tags=["AuditLogs"])
 app.include_router(proxy_router.router, prefix="/api/v1", tags=["Proxy"])
@@ -233,6 +252,7 @@ async def public_status() -> JSONResponse:
     """Public status endpoint — no auth required."""
     try:
         from utils.stats import DashboardStats
+
         stats = DashboardStats(config_manager, db_manager)
         health = stats.get_health_status()
     except Exception:
@@ -255,7 +275,11 @@ async def public_status() -> JSONResponse:
         try:
             bkps = db_manager.list_backups(db_id)
             if bkps:
-                ts = bkps[0]["date"].isoformat() if hasattr(bkps[0]["date"], "isoformat") else str(bkps[0]["date"])
+                ts = (
+                    bkps[0]["date"].isoformat()
+                    if hasattr(bkps[0]["date"], "isoformat")
+                    else str(bkps[0]["date"])
+                )
                 if last_backup_ts is None or ts > last_backup_ts:
                     last_backup_ts = ts
         except Exception:
@@ -278,7 +302,9 @@ async def health_check() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "tasks": {
-            "running": len([t for t in task_manager.tasks.values() if t["status"] == "running"]),
+            "running": len(
+                [t for t in task_manager.tasks.values() if t["status"] == "running"]
+            ),
             "total": len(task_manager.tasks),
         },
     }

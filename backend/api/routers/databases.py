@@ -26,7 +26,9 @@ _admin_only = [Depends(require_role("admin"))]
 _admin_op = [Depends(require_role("admin", "operator"))]
 
 
-@router.get("/databases", response_model=List[DatabaseResponse], dependencies=_all_roles)
+@router.get(
+    "/databases", response_model=List[DatabaseResponse], dependencies=_all_roles
+)
 async def list_databases(
     config_manager: ConfigManager = Depends(get_config_manager),
 ) -> List[DatabaseResponse]:
@@ -41,7 +43,9 @@ async def list_databases(
     return results
 
 
-@router.get("/databases/{database_id}", response_model=DatabaseResponse, dependencies=_all_roles)
+@router.get(
+    "/databases/{database_id}", response_model=DatabaseResponse, dependencies=_all_roles
+)
 async def get_database(
     database_id: int, config_manager: ConfigManager = Depends(get_config_manager)
 ) -> DatabaseResponse:
@@ -59,7 +63,9 @@ async def get_database(
 
 
 @router.post(
-    "/databases", response_model=DatabaseResponse, status_code=status.HTTP_201_CREATED,
+    "/databases",
+    response_model=DatabaseResponse,
+    status_code=status.HTTP_201_CREATED,
     dependencies=_admin_only,
 )
 async def create_database(
@@ -100,7 +106,11 @@ async def create_database(
     return created_model
 
 
-@router.put("/databases/{database_id}", response_model=DatabaseResponse, dependencies=_admin_only)
+@router.put(
+    "/databases/{database_id}",
+    response_model=DatabaseResponse,
+    dependencies=_admin_only,
+)
 async def update_database(
     database_id: int,
     database: DatabaseUpdate,
@@ -175,7 +185,11 @@ async def update_database(
     return updated_model
 
 
-@router.delete("/databases/{database_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_only)
+@router.delete(
+    "/databases/{database_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_admin_only,
+)
 async def delete_database(
     database_id: int, config_manager: ConfigManager = Depends(get_config_manager)
 ) -> None:
@@ -197,7 +211,8 @@ async def delete_database(
 
     # Remove associated schedules from config
     config_manager.config["schedules"] = [
-        s for s in config_manager.config.get("schedules", [])
+        s
+        for s in config_manager.config.get("schedules", [])
         if s.get("database_id") != database_id
     ]
     config_manager.save_config()
@@ -208,7 +223,11 @@ async def delete_database(
     return None
 
 
-@router.post("/databases/{database_id}/test", response_model=DatabaseTestResult, dependencies=_admin_op)
+@router.post(
+    "/databases/{database_id}/test",
+    response_model=DatabaseTestResult,
+    dependencies=_admin_op,
+)
 async def test_database_connection(
     database_id: int, db_manager: DBManager = Depends(get_db_manager)
 ) -> DatabaseTestResult:
@@ -238,7 +257,11 @@ async def test_database_connection(
         )
 
 
-@router.get("/databases/{database_id}/uptime", response_model=UptimeResponse, dependencies=_all_roles)
+@router.get(
+    "/databases/{database_id}/uptime",
+    response_model=UptimeResponse,
+    dependencies=_all_roles,
+)
 async def get_database_uptime(
     database_id: int,
     period: str = "week",
@@ -254,7 +277,9 @@ async def get_database_uptime(
 
     windows = {"day": 1, "week": 7, "month": 30, "year": 365}
     if period not in windows:
-        raise HTTPException(status_code=400, detail="period must be day, week, month, or year")
+        raise HTTPException(
+            status_code=400, detail="period must be day, week, month, or year"
+        )
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=windows[period])
     cutoff_str = cutoff.isoformat()

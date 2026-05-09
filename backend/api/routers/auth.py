@@ -98,7 +98,11 @@ async def login_for_access_token(
     if not ok:
         # Critical audit: sync write so lockout events are not lost.
         await record_audit(
-            action="auth.login.lockout" if reason == "account_locked" else "auth.login.rate_limited",
+            action=(
+                "auth.login.lockout"
+                if reason == "account_locked"
+                else "auth.login.rate_limited"
+            ),
             status="denied",
             resource_type="auth",
             request=request,
@@ -152,7 +156,9 @@ async def change_own_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    if not auth_manager.verify_password(body.current_password, current_user.password_hash):
+    if not auth_manager.verify_password(
+        body.current_password, current_user.password_hash
+    ):
         await record_audit(
             action="auth.password_change",
             status="failure",
@@ -161,9 +167,13 @@ async def change_own_password(
         )
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if body.new_password == body.current_password:
-        raise HTTPException(status_code=400, detail="New password must differ from current")
+        raise HTTPException(
+            status_code=400, detail="New password must differ from current"
+        )
     if current_user.username.lower() in body.new_password.lower():
-        raise HTTPException(status_code=400, detail="Password must not contain username")
+        raise HTTPException(
+            status_code=400, detail="Password must not contain username"
+        )
 
     current_user.password_hash = auth_manager.get_password_hash(body.new_password)
     current_user.must_change_password = False

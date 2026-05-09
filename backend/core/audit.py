@@ -44,7 +44,10 @@ def _sanitize_details(details: Any) -> Any:
         out = {}
         for k, v in details.items():
             key = str(k).lower()
-            if any(tag in key for tag in ("password", "secret", "token", "apikey", "api_key")):
+            if any(
+                tag in key
+                for tag in ("password", "secret", "token", "apikey", "api_key")
+            ):
                 out[k] = "***"
             elif isinstance(v, str) and len(v) > 500:
                 out[k] = v[:500] + "…"

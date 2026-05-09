@@ -136,7 +136,10 @@ class SlackNotifier(BaseNotifier):
         try:
             # Determine color based on type
             color = "#36a64f"  # green
-            if "failure" in notification_type.value or "down" in notification_type.value:
+            if (
+                "failure" in notification_type.value
+                or "down" in notification_type.value
+            ):
                 color = "#ff0000"  # red
 
             # Build Slack message
@@ -211,7 +214,10 @@ class TeamsNotifier(BaseNotifier):
         try:
             # Determine theme color
             theme_color = "28a745"  # green
-            if "failure" in notification_type.value or "down" in notification_type.value:
+            if (
+                "failure" in notification_type.value
+                or "down" in notification_type.value
+            ):
                 theme_color = "dc3545"  # red
 
             # Build Teams message (Adaptive Card format)
@@ -273,7 +279,10 @@ class DiscordNotifier(BaseNotifier):
         try:
             # Determine color
             color = 3066993  # green
-            if "failure" in notification_type.value or "down" in notification_type.value:
+            if (
+                "failure" in notification_type.value
+                or "down" in notification_type.value
+            ):
                 color = 15158332  # red
 
             # Build Discord embed

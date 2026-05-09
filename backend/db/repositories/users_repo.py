@@ -17,13 +17,16 @@ async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
     return result.scalar_one_or_none()
 
 
-async def list_users(session: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
+async def list_users(
+    session: AsyncSession, skip: int = 0, limit: int = 100
+) -> List[User]:
     result = await session.execute(select(User).offset(skip).limit(limit))
     return list(result.scalars().all())
 
 
 async def count_users(session: AsyncSession) -> int:
     from sqlalchemy import func
+
     result = await session.execute(select(func.count(User.id)))
     return result.scalar_one()
 

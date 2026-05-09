@@ -18,7 +18,9 @@ app.add_typer(proxy_app, name="proxy")
 
 @proxy_app.command("bootstrap")
 def proxy_bootstrap(
-    force: bool = typer.Option(False, "--force", help="Reconfigure even if proxy.json exists"),
+    force: bool = typer.Option(
+        False, "--force", help="Reconfigure even if proxy.json exists"
+    ),
 ) -> None:
     """First-run setup: env-driven or interactive wizard."""
     from proxy.wizard import bootstrap
@@ -70,6 +72,7 @@ def proxy_restart() -> None:
     mgr = ProxyConfigManager()
     ok = ProxyManager(mgr).restart_container(mgr.load())
     console.print("[green]restarted[/green]" if ok else "[red]restart failed[/red]")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLI COMMANDS

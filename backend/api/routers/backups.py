@@ -41,9 +41,7 @@ def _resolve_local_backup(backup_file: str) -> Path:
     if not backup_file or "\x00" in backup_file:
         raise HTTPException(status_code=400, detail="Invalid backup_file")
     if not backup_file.endswith(_ALLOWED_BACKUP_EXTS):
-        raise HTTPException(
-            status_code=400, detail="Backup file extension not allowed"
-        )
+        raise HTTPException(status_code=400, detail="Backup file extension not allowed")
     try:
         candidate = Path(backup_file).resolve(strict=False)
         root = BACKUP_ROOT.resolve(strict=False)
@@ -52,10 +50,9 @@ def _resolve_local_backup(backup_file: str) -> Path:
     try:
         candidate.relative_to(root)
     except ValueError:
-        raise HTTPException(
-            status_code=400, detail="Backup path escapes backup root"
-        )
+        raise HTTPException(status_code=400, detail="Backup path escapes backup root")
     return candidate
+
 
 router = APIRouter()
 
@@ -205,7 +202,11 @@ def run_restore_from_s3_task(
                 pass
 
 
-@router.post("/databases/{database_id}/backup", response_model=TaskResponse, dependencies=_admin_op)
+@router.post(
+    "/databases/{database_id}/backup",
+    response_model=TaskResponse,
+    dependencies=_admin_op,
+)
 async def start_backup(
     database_id: int,
     background_tasks: BackgroundTasks,
@@ -240,7 +241,11 @@ async def start_backup(
     return TaskResponse(task_id=task_id, status="pending", message="Backup started")
 
 
-@router.post("/databases/{database_id}/restore", response_model=TaskResponse, dependencies=_admin_op)
+@router.post(
+    "/databases/{database_id}/restore",
+    response_model=TaskResponse,
+    dependencies=_admin_op,
+)
 async def start_restore(
     database_id: int,
     restore_request: RestoreRequest,
@@ -330,7 +335,11 @@ async def get_task_status(task_id: str) -> TaskStatus:
     return TaskStatus(**task)
 
 
-@router.get("/databases/{database_id}/backups", response_model=List[BackupInfo], dependencies=_all_roles)
+@router.get(
+    "/databases/{database_id}/backups",
+    response_model=List[BackupInfo],
+    dependencies=_all_roles,
+)
 async def list_backups(
     database_id: int,
     location: Optional[str] = None,
@@ -378,7 +387,9 @@ async def list_backups(
     return backup_list
 
 
-@router.post("/backups/verify", response_model=BackupVerifyResponse, dependencies=_admin_op)
+@router.post(
+    "/backups/verify", response_model=BackupVerifyResponse, dependencies=_admin_op
+)
 async def verify_backup(
     payload: BackupVerifyRequest,
     db_manager: DBManager = Depends(get_db_manager),
@@ -422,7 +433,9 @@ async def verify_backup(
         )
 
 
-@router.delete("/backups", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_op)
+@router.delete(
+    "/backups", status_code=status.HTTP_204_NO_CONTENT, dependencies=_admin_op
+)
 async def delete_backup(
     backup_file: str,
     request: Request,
@@ -469,7 +482,11 @@ async def delete_backup(
                 resource_type="backup",
                 resource_id=str(database_id) if database_id else None,
                 request=request,
-                details={"backup_file": str(resolved), "location": "local", "error": str(e)},
+                details={
+                    "backup_file": str(resolved),
+                    "location": "local",
+                    "error": str(e),
+                },
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -535,7 +552,11 @@ async def delete_backup(
         raise HTTPException(status_code=400, detail="Invalid location")
 
 
-@router.post("/databases/{database_id}/backups/sync", response_model=BackupSyncResult, dependencies=_admin_op)
+@router.post(
+    "/databases/{database_id}/backups/sync",
+    response_model=BackupSyncResult,
+    dependencies=_admin_op,
+)
 async def sync_backups(
     database_id: int,
     sync_request: BackupSyncRequest,
@@ -590,7 +611,9 @@ async def sync_backups(
     )
 
 
-@router.patch("/backups/metadata", response_model=BackupMetadataResponse, dependencies=_admin_op)
+@router.patch(
+    "/backups/metadata", response_model=BackupMetadataResponse, dependencies=_admin_op
+)
 async def update_backup_metadata(
     payload: BackupMetadataUpdate,
     config_manager: ConfigManager = Depends(get_config_manager),
@@ -608,7 +631,11 @@ async def update_backup_metadata(
     )
 
 
-@router.get("/backups/metadata/{filename:path}", response_model=BackupMetadataResponse, dependencies=_all_roles)
+@router.get(
+    "/backups/metadata/{filename:path}",
+    response_model=BackupMetadataResponse,
+    dependencies=_all_roles,
+)
 async def get_backup_metadata(
     filename: str,
     config_manager: ConfigManager = Depends(get_config_manager),

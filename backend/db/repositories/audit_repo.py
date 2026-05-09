@@ -94,5 +94,7 @@ async def count_audit_logs(
 
 
 async def list_distinct_actions(session: AsyncSession) -> List[str]:
-    result = await session.execute(select(distinct(AuditLog.action)).order_by(AuditLog.action))
+    result = await session.execute(
+        select(distinct(AuditLog.action)).order_by(AuditLog.action)
+    )
     return list(result.scalars().all())

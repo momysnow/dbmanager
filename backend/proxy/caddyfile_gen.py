@@ -18,9 +18,14 @@ _DNS_DIRECTIVE = {
 
 def _global_block(cfg: ProxyConfig) -> str:
     lines = ["{", "    admin 0.0.0.0:2019"]
-    if cfg.mode == ProxyMode.HTTPS and cfg.acme.email and cfg.acme.method in (
-        AcmeMethod.DNS,
-        AcmeMethod.HTTP01,
+    if (
+        cfg.mode == ProxyMode.HTTPS
+        and cfg.acme.email
+        and cfg.acme.method
+        in (
+            AcmeMethod.DNS,
+            AcmeMethod.HTTP01,
+        )
     ):
         lines.append(f"    email {cfg.acme.email}")
     if cfg.mode == ProxyMode.HTTP:
@@ -74,7 +79,7 @@ def render_caddyfile(cfg: ProxyConfig) -> str:
         # Keep Caddy alive with a placeholder responder so admin API stays up.
         return (
             "{\n    admin 0.0.0.0:2019\n    auto_https off\n}\n\n"
-            ":80 {\n    respond \"DBManager proxy disabled\" 503\n}\n"
+            ':80 {\n    respond "DBManager proxy disabled" 503\n}\n'
         )
 
     return _global_block(cfg) + "\n\n" + _site_block(cfg) + "\n"

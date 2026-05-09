@@ -73,13 +73,17 @@ def _proxy_summary(cfg: ProxyConfig) -> List[Tuple[str, str]]:
             rows.append(("manual_cert.cert", cfg.manual_cert.cert_path))
             rows.append(("manual_cert.key", cfg.manual_cert.key_path))
     rows.append(("routes.frontend", cfg.routes.frontend_upstream))
-    rows.append(("routes.backend", cfg.routes.backend_upstream + cfg.routes.backend_path_prefix))
+    rows.append(
+        ("routes.backend", cfg.routes.backend_upstream + cfg.routes.backend_path_prefix)
+    )
     rows.append(("admin_url", cfg.admin_url))
     return rows
 
 
 def _render_table(title: str, rows: Iterable[Tuple[str, str]]) -> Table:
-    t = Table(title=title, show_header=True, header_style="bold cyan", title_justify="left")
+    t = Table(
+        title=title, show_header=True, header_style="bold cyan", title_justify="left"
+    )
     t.add_column("key", style="bold")
     t.add_column("value")
     for k, v in rows:

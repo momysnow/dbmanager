@@ -10,7 +10,10 @@ DB_PATH = CONFIG_DIR / "dbmanager.db"
 
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
-engine = create_async_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+engine = create_async_engine(
+    DATABASE_URL, echo=False, connect_args={"check_same_thread": False}
+)
+
 
 # Enable WAL mode for better concurrency
 @event.listens_for(engine.sync_engine, "connect")
@@ -20,7 +23,9 @@ def set_wal_mode(dbapi_connection, connection_record):  # type: ignore[no-untype
     cursor.close()
 
 
-AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+AsyncSessionLocal = async_sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

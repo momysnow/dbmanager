@@ -38,6 +38,7 @@ class AuthManager:
 
         if not secret:
             import secrets
+
             secret = secrets.token_urlsafe(32)
             if "auth" not in self.config_manager.config:
                 self.config_manager.config["auth"] = {}
@@ -62,7 +63,9 @@ class AuthManager:
     def get_password_hash(self, password: str) -> str:
         return str(self.pwd_context.hash(password))
 
-    def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    def create_access_token(
+        self, data: dict, expires_delta: Optional[timedelta] = None
+    ) -> str:
         to_encode = data.copy()
         expire = datetime.now(timezone.utc) + (
             expires_delta or timedelta(minutes=self.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -77,7 +80,9 @@ class AuthManager:
         except JWTError:
             return None
 
-    async def authenticate(self, username: str, password: str, session: AsyncSession) -> Optional[User]:
+    async def authenticate(
+        self, username: str, password: str, session: AsyncSession
+    ) -> Optional[User]:
         user = await get_user_by_username(session, username)
         if not user:
             # Run a dummy verify to keep timing flat for unknown usernames.
